@@ -1,0 +1,19 @@
+model:
+  baseUrl: https://provider.example/v1
+  apiKey: replace-with-your-api-key
+  name: vision-model
+  timeoutMs: 240000
+  maxRetries: 1
+
+prompt:
+  file: ./prompts/handnote.md
+
+maxSteps: 18
+maxInspectCalls: 3
+width: 1600
+toolMedia:
+  maxEdge: 2048
+  jpegQuality: 85
+theme: clean
+fontFamily: sans-serif
+saveIntermediateImages: true

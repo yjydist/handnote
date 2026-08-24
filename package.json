@@ -1,0 +1,37 @@
+{
+  "name": "handnote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "handnote": "./src/cli.ts"
+  },
+  "scripts": {
+    "check": "biome check .",
+    "eval:real": "bun run scripts/real-eval.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.35",
+    "@fontsource-variable/noto-sans-sc": "5.3.0",
+    "@mastra/core": "1.61.0",
+    "ai": "7.0.77",
+    "commander": "15.0.0",
+    "katex": "0.18.0",
+    "mermaid": "11.12.2",
+    "playwright": "1.62.0",
+    "sharp": "0.35.0",
+    "yaml": "2.8.1",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4",
+    "@types/bun": "1.2.21",
+    "@types/katex": "0.16.7",
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "bun": ">=1.4.0 <1.5.0"
+  }
+}
