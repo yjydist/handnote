@@ -17,7 +17,8 @@ import {
   repairOpenAiToolArguments,
   requestFingerprint,
 } from "../src/provider.ts";
-import { redact, SessionRecorder } from "../src/session.ts";
+import { redact } from "../src/redact.ts";
+import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools.ts";
 
