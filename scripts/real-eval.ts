@@ -419,20 +419,34 @@ export function renderEvalReport(report: EvalReport): string {
   return `${lines.join("\n")}\n`;
 }
 
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"] as const;
+
+async function collectImages(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const paths = await Promise.all(
+    entries.map(async (entry) => {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) return collectImages(path);
+      if (
+        entry.isFile() &&
+        IMAGE_EXTENSIONS.includes(
+          extname(
+            entry.name,
+          ).toLowerCase() as (typeof IMAGE_EXTENSIONS)[number],
+        )
+      )
+        return [path];
+      return [];
+    }),
+  );
+  return paths.flat();
+}
+
 async function selectImages(
   dataDirectory: string,
   cases: string | undefined,
 ): Promise<string[]> {
-  const images = (await readdir(dataDirectory, { withFileTypes: true }))
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        [".png", ".jpg", ".jpeg", ".webp"].includes(
-          extname(entry.name).toLowerCase(),
-        ),
-    )
-    .map((entry) => `${dataDirectory}/${entry.name}`)
-    .sort();
+  const images = (await collectImages(dataDirectory)).sort();
   if (!cases) return images;
   const selected: string[] = [];
   for (const token of cases
