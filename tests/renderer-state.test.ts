@@ -7,7 +7,7 @@ import type { PatchOperation } from "../src/patch.ts";
 import { renderDocument } from "../src/renderer.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools.ts";
+import { createHandnoteTools } from "../src/tools/index.ts";
 import { fullRegion, simpleDocument, simpleDraft } from "./helpers.ts";
 
 const directories: string[] = [];

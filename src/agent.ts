@@ -5,7 +5,7 @@ import { safeErrorMetadata } from "./errors.ts";
 import { classifyProviderError, type createModel } from "./provider.ts";
 import type { SessionRecorder } from "./session.ts";
 import type { RunState } from "./state.ts";
-import type { createHandnoteTools } from "./tools.ts";
+import type { createHandnoteTools } from "./tools/index.ts";
 
 export interface AgentRunResult {
   finishReason: string;

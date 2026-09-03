@@ -8,7 +8,7 @@ import { displayMetadata } from "./image.ts";
 import { createModel, type ProviderStats } from "./provider.ts";
 import { SessionRecorder } from "./session.ts";
 import { RunState } from "./state.ts";
-import { createHandnoteTools } from "./tools.ts";
+import { createHandnoteTools } from "./tools/index.ts";
 import {
   atomicWrite,
   createUniqueDirectory,

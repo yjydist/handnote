@@ -1,0 +1,100 @@
+import { asError, HandnoteError } from "../errors.ts";
+import { createModelPreviews, type ModelPreview } from "../image.ts";
+import type { LayoutWarning } from "../renderer.ts";
+import type { ToolContext } from "./types.ts";
+
+export const toolError = (code: string, message: string) => ({
+  ok: false as const,
+  error: { code, message, repairable: true as const },
+});
+
+export function remainingSteps(context: ToolContext): string {
+  const remaining = Math.max(0, context.maxSteps - context.state.modelStep);
+  return `${remaining} model step(s) remain after this one`;
+}
+
+export function layoutSummary(warnings: LayoutWarning[]): string {
+  const blocking = warnings.filter((warning) => warning.blocking);
+  if (blocking.length === 0) return "no blocking layout warnings";
+  return `${blocking.length} blocking layout warning(s): ${blocking
+    .map(
+      (warning) =>
+        `${warning.code}${warning.elementId ? `/${warning.elementId}` : ""}: ${warning.message}`,
+    )
+    .join("; ")}`;
+}
+
+export interface ToolRuntime {
+  fatal(error: unknown): never;
+  mediaOutputWithFatal(
+    purpose: "inspect_source" | "review_render",
+    output: {
+      ok: boolean;
+      path?: string | undefined;
+      mimeType?: string | undefined;
+      summary?: string | undefined;
+    },
+  ): Promise<{ type: string; value: unknown }>;
+}
+
+export function createToolRuntime(context: ToolContext): ToolRuntime {
+  const modelMedia = new Map<string, Promise<ModelPreview[]>>();
+  const fatal = (error: unknown): never => {
+    const value =
+      error instanceof HandnoteError
+        ? error
+        : new HandnoteError(asError(error).message, "internal", false, {
+            cause: error,
+          });
+    context.state.fail(value);
+    throw value;
+  };
+  const mediaOutputWithFatal = async (
+    purpose: "inspect_source" | "review_render",
+    output: {
+      ok: boolean;
+      path?: string | undefined;
+      mimeType?: string | undefined;
+      summary?: string | undefined;
+    },
+  ) => {
+    try {
+      if (!output.ok || !output.path)
+        return { type: "text", value: output.summary ?? "Tool failed" };
+      const existing = modelMedia.get(output.path);
+      const pending =
+        existing ?? createModelPreviews(output.path, context.toolMedia);
+      if (!existing) modelMedia.set(output.path, pending);
+      const previews = await pending;
+      context.recorder.record("tool.model_media.prepared", {
+        purpose,
+        cacheHit: Boolean(existing),
+        source: await context.recorder.media(
+          output.path,
+          output.mimeType ?? "image/png",
+        ),
+        previews: previews.map(({ data: _data, ...preview }) => preview),
+      });
+      return {
+        type: "content",
+        value: [
+          { type: "text", text: output.summary ?? "Image result" },
+          ...previews.flatMap((preview, index) => [
+            {
+              type: "text" as const,
+              text: `Preview ${index + 1}/${previews.length} ${preview.width}×${preview.height}`,
+            },
+            {
+              type: "image-data" as const,
+              data: preview.data,
+              mediaType: preview.mediaType,
+            },
+          ]),
+        ],
+      };
+    } catch (error) {
+      return fatal(error);
+    }
+  };
+  return { fatal, mediaOutputWithFatal };
+}

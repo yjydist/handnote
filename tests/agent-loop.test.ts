@@ -13,7 +13,7 @@ import type { HandnoteConfig } from "../src/config.ts";
 import type { createModel } from "../src/provider.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools.ts";
+import { createHandnoteTools } from "../src/tools/index.ts";
 import { simpleDraft } from "./helpers.ts";
 
 const directories: string[] = [];
