@@ -15,6 +15,7 @@ import {
   createRetryingFetch,
   promoteToolMedia,
   repairOpenAiToolArguments,
+  repairToolArgumentResponse,
   requestFingerprint,
 } from "../src/provider.ts";
 import { redact } from "../src/redact.ts";
@@ -427,6 +428,7 @@ describe("session and provider transport", () => {
           }),
           { headers: { "content-type": "application/json" } },
         )) as unknown as typeof fetch,
+      repairToolArgumentResponse(recorder),
     );
     const response = await retrying("https://example.test");
     const payload = (await response.json()) as {
