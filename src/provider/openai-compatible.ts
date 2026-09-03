@@ -1,11 +1,10 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { JSONObject, LanguageModelV4Usage } from "@ai-sdk/provider";
-import type { HandnoteConfig } from "../config.ts";
 import { HandnoteError } from "../errors.ts";
 import type { SessionRecorder } from "../session.ts";
-import type { RunState } from "../state.ts";
 import { finiteNumber, record } from "./primitives.ts";
-import { createRetryingFetch, type ProviderStats } from "./retry.ts";
+import { createRetryingFetch } from "./retry.ts";
+import type { ProviderAdapter } from "./types.ts";
 
 export interface ToolArgumentRepair {
   toolName: string;
@@ -274,27 +273,25 @@ export function promoteToolMedia(
   return { ...body, messages: output };
 }
 
-export function createModel(
-  config: HandnoteConfig,
-  recorder: SessionRecorder,
-  state: RunState,
-  stats: ProviderStats,
-) {
-  const transport = createRetryingFetch(
-    config.model,
-    recorder,
-    state,
-    stats,
-    fetch,
-    repairToolArgumentResponse(recorder),
-  );
-  const provider = createOpenAICompatible({
-    name: "handnote-provider",
-    baseURL: config.model.baseUrl.replace(/\/$/, ""),
-    apiKey: config.model.apiKey,
-    fetch: transport as unknown as typeof fetch,
-    transformRequestBody: promoteToolMedia,
-    convertUsage: convertDeepSeekUsage,
-  });
-  return provider(config.model.name);
-}
+export const openAiCompatibleAdapter: ProviderAdapter = {
+  protocol: "openai-compatible",
+  createModel({ config, recorder, state, stats }) {
+    const transport = createRetryingFetch(
+      config.model,
+      recorder,
+      state,
+      stats,
+      fetch,
+      repairToolArgumentResponse(recorder),
+    );
+    const provider = createOpenAICompatible({
+      name: "handnote-provider",
+      baseURL: config.model.baseUrl.replace(/\/$/, ""),
+      apiKey: config.model.apiKey,
+      fetch: transport as unknown as typeof fetch,
+      transformRequestBody: promoteToolMedia,
+      convertUsage: convertDeepSeekUsage,
+    });
+    return provider(config.model.name);
+  },
+};

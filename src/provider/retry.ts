@@ -4,16 +4,7 @@ import type { SessionRecorder } from "../session.ts";
 import type { RunState } from "../state.ts";
 import { classifyProviderError } from "./classify.ts";
 import { isRetryableStatus, record, retryAfter } from "./primitives.ts";
-
-export interface ProviderStats {
-  retries: number;
-  attempts: number;
-}
-
-export interface RetryConfig {
-  timeoutMs: number;
-  maxRetries: number;
-}
+import type { ProviderStats, RetryConfig } from "./types.ts";
 
 export function requestFingerprint(body: BodyInit | null | undefined):
   | {

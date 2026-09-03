@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { Agent } from "@mastra/core/agent";
 import type { HandnoteConfig } from "./config.ts";
 import { safeErrorMetadata } from "./errors.ts";
-import { classifyProviderError, type createModel } from "./provider.ts";
+import { classifyProviderError, type createModel } from "./provider/index.ts";
 import type { SessionRecorder } from "./session.ts";
 import type { RunState } from "./state.ts";
 import type { createHandnoteTools } from "./tools/index.ts";

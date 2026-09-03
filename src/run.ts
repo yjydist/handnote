@@ -5,7 +5,7 @@ import { createAgentRunStats, runAgent } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
-import { createModel, type ProviderStats } from "./provider.ts";
+import { createModel, type ProviderStats } from "./provider/index.ts";
 import { SessionRecorder } from "./session.ts";
 import { RunState } from "./state.ts";
 import { createHandnoteTools } from "./tools/index.ts";
@@ -223,7 +223,7 @@ export async function executeRun(
       state,
       recorder,
     });
-    const model = createModel(config, recorder, state, stats);
+    const model = createModel({ config, recorder, state, stats });
     const result = await runAgent({
       config,
       model,

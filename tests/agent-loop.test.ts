@@ -10,7 +10,7 @@ import {
   runAgent,
 } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
-import type { createModel } from "../src/provider.ts";
+import type { createModel } from "../src/provider/index.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
