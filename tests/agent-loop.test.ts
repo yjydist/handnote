@@ -110,6 +110,7 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   });
   const config: HandnoteConfig = {
     model: {
+      provider: "openai-compatible",
       baseUrl: "https://offline.invalid/v1",
       apiKey: "offline",
       name: "offline",
@@ -184,6 +185,7 @@ test("records a redacted stream error with its model step", async () => {
   });
   const config: HandnoteConfig = {
     model: {
+      provider: "openai-compatible",
       baseUrl: "https://offline.invalid/v1",
       apiKey: "offline",
       name: "offline",

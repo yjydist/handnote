@@ -8,6 +8,7 @@ const rawConfigSchema = z
   .object({
     model: z
       .object({
+        provider: z.enum(["openai-compatible"]).default("openai-compatible"),
         baseUrl: z.url(),
         apiKey: z.string().min(1),
         name: z.string().min(1),
