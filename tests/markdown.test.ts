@@ -157,7 +157,31 @@ $$
     ]);
   });
 
-  test("rejects links, click directives, HTML anchors, asset directives, and URLs inside mermaid blocks", async () => {
+  test("rejects raw HTML inside mermaid blocks", async () => {
+    const runDirectory = await temporary();
+    const cases = [
+      'a["<img src="data:image/png;base64,AAAA">"] --> b',
+      'a["<span>text</span>"] --> b',
+      'a["line<br/>break"] --> b',
+      'a["<IMG\n  src="data:image/png;base64,AAAA">"] --> b',
+      "a[\"<a href='https://example.test'>x</a>\"] --> b",
+      'a["<!-- hidden -->text"] --> b',
+      'a["<!DOCTYPE html>text"] --> b',
+      'a["<![CDATA[text]]>"] --> b',
+      'a["<?processing instruction?>text"] --> b',
+    ];
+    for (const source of cases)
+      await expectIssues(
+        `前文。\n\n\`\`\`mermaid\nflowchart TD\n  ${source}\n\`\`\``,
+        runDirectory,
+        ["raw_html"],
+      ).then((issues) => {
+        expect(issues[0]?.line).toBe(3);
+        expect(issues[0]?.message).toContain("Mermaid");
+      });
+  });
+
+  test("rejects links, click directives, asset directives, and URLs inside mermaid blocks", async () => {
     const runDirectory = await temporary();
     await expectIssues(
       '```mermaid\nflowchart TD\n  a --> b\n  click a "https://example.test"\n```',
@@ -166,11 +190,6 @@ $$
     ).then((issues) => expect(issues[0]?.message).toContain("Mermaid"));
     await expectIssues(
       '```mermaid\nflowchart TD\n  a["[label](https://example.test)"] --> b\n```',
-      runDirectory,
-      ["link_not_allowed"],
-    );
-    await expectIssues(
-      "```mermaid\nflowchart TD\n  a[\"<a href='https://example.test'>x</a>\"] --> b\n```",
       runDirectory,
       ["link_not_allowed"],
     );
@@ -211,6 +230,10 @@ $$
     );
     await parseNoteMarkdown(
       '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision } \\"ok\\"" } --> b\n```',
+      { runDirectory },
+    );
+    await parseNoteMarkdown(
+      '```mermaid\nflowchart TD\n  a["A < B > C"] --> b\n  b["&lt;span&gt;text&lt;/span&gt;"] --> c\n```',
       { runDirectory },
     );
     await parseNoteMarkdown("```mermaid\nflowchart TD\n  click --> node\n```", {

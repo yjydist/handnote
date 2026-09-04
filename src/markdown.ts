@@ -75,10 +75,20 @@ const startLine = (node: LocatedNode): number | undefined =>
 
 const mermaidLinkPatterns: RegExp[] = [
   /\[[^\]]*\]\([^)]*\)/,
-  /<a\b/i,
   /href\s*=/i,
   /https?:\/\//i,
 ];
+
+const mermaidRawHtmlPatterns: RegExp[] = [
+  /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s+(?:[^"'<>]|"[^"]*"|'[^']*')*)?\s*\/?>/,
+  /<!--[\s\S]*?-->/,
+  /<!\[CDATA\[[\s\S]*?\]\]>/i,
+  /<![A-Za-z][^<>]*>/,
+  /<\?[\s\S]*?\?>/,
+];
+
+const mermaidHasRawHtml = (value: string): boolean =>
+  mermaidRawHtmlPatterns.some((pattern) => pattern.test(value));
 
 function isEscaped(value: string, index: number): boolean {
   let slashes = 0;
@@ -274,10 +284,22 @@ function validateIssues(tree: Root): MarkdownIssue[] {
           "Mermaid fences must use the exact lowercase language name `mermaid`",
           node,
         );
-      if (code.lang === "mermaid" && mermaidHasLink(code.value ?? ""))
+      const mermaidHasHtml =
+        code.lang === "mermaid" && mermaidHasRawHtml(code.value ?? "");
+      if (mermaidHasHtml)
+        addUnique(
+          "raw_html",
+          "Raw HTML is not allowed in Mermaid diagrams; use plain Mermaid label text instead",
+          node,
+        );
+      if (
+        code.lang === "mermaid" &&
+        !mermaidHasHtml &&
+        mermaidHasLink(code.value ?? "")
+      )
         addUnique(
           "link_not_allowed",
-          "Links are not allowed in Mermaid diagrams (click directives, markdown links, HTML anchors, asset directives, or URLs); write URLs as inline code instead",
+          "Links are not allowed in Mermaid diagrams (click directives, markdown links, asset directives, or URLs); write URLs as inline code instead",
           node,
         );
     }
