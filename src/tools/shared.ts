@@ -27,7 +27,7 @@ export function layoutSummary(warnings: LayoutWarning[]): string {
 export interface ToolRuntime {
   fatal(error: unknown): never;
   mediaOutputWithFatal(
-    purpose: "inspect_source" | "review_render",
+    purpose: "inspect_source" | "review_render" | "capture_figure",
     output: {
       ok: boolean;
       path?: string | undefined;

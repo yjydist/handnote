@@ -236,6 +236,47 @@ function enhance(
   return pipeline;
 }
 
+export const captureFigureInputSchema = z
+  .object({ region: regionSchema })
+  .strict();
+
+export type CaptureFigureRequest = z.infer<typeof captureFigureInputSchema>;
+
+export async function captureFigure(
+  source: string,
+  outputDirectory: string,
+  request: CaptureFigureRequest,
+  sequence: number,
+): Promise<{
+  path: string;
+  relativePath: string;
+  width: number;
+  height: number;
+}> {
+  const parsed = captureFigureInputSchema.parse(request);
+  if (sequence < 1 || sequence > 999)
+    throw new Error("Figure sequence must stay within 1..999");
+  const metadata = await displayMetadata(source);
+  const pixels = regionPixels(parsed.region, metadata.width, metadata.height);
+  const data = await sharp(source)
+    .rotate()
+    .extract(pixels)
+    .normalize()
+    .sharpen({ sigma: 0.6 })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+  const suffix = String(sequence).padStart(3, "0");
+  await mkdir(outputDirectory, { recursive: true });
+  const path = `${outputDirectory}/figure-${suffix}.png`;
+  await Bun.write(path, data.data);
+  return {
+    path,
+    relativePath: `assets/figures/figure-${suffix}.png`,
+    width: data.info.width,
+    height: data.info.height,
+  };
+}
+
 export async function inspectSource(
   source: string,
   outputDirectory: string,
