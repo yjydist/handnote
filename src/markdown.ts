@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { ElementContent, Root as HastRoot } from "hast";
 import katex from "katex";
 import type { Root } from "mdast";
+import { SAXParser } from "parse5-sax-parser";
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
 import remarkRehype from "remark-rehype";
@@ -79,16 +80,16 @@ const mermaidLinkPatterns: RegExp[] = [
   /https?:\/\//i,
 ];
 
-const mermaidRawHtmlPatterns: RegExp[] = [
-  /<\/?[A-Za-z][^\t\n\f\r />]*(?:[^"'>]|"[^"]*"|'[^']*')*>/,
-  /<!--[\s\S]*?-->/,
-  /<!\[CDATA\[[\s\S]*?\]\]>/i,
-  /<![A-Za-z][^<>]*>/,
-  /<\?[\s\S]*?\?>/,
-];
-
-const mermaidHasRawHtml = (value: string): boolean =>
-  mermaidRawHtmlPatterns.some((pattern) => pattern.test(value));
+function mermaidHasRawHtml(value: string): boolean {
+  let found = false;
+  const parser = new SAXParser();
+  for (const event of ["startTag", "endTag", "comment", "doctype"] as const)
+    parser.on(event, () => {
+      found = true;
+    });
+  parser.end(value);
+  return found;
+}
 
 function isEscaped(value: string, index: number): boolean {
   let slashes = 0;

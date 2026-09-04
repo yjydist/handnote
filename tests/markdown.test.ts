@@ -172,6 +172,7 @@ $$
       'a["<x_y>text</x_y>"] --> b',
       'a["<x@y>text</x@y>"] --> b',
       'a["<x=y>text</x=y>"] --> b',
+      'a["orphan </custom.tag> close"] --> b',
       "a[\"<a href='https://example.test'>x</a>\"] --> b",
       'a["<!-- hidden -->text"] --> b',
       'a["<!DOCTYPE html>text"] --> b',
