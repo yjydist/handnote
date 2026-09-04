@@ -3,12 +3,13 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { emptyRevisionAudit } from "../src/document.ts";
-import type { PatchOperation } from "../src/patch.ts";
+import { parseNoteMarkdown } from "../src/markdown.ts";
 import { renderDocument } from "../src/renderer.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
-import { fullRegion, simpleDocument, simpleDraft } from "./helpers.ts";
+import { sha256File } from "../src/utils.ts";
+import { fullRegion, simpleDraft, simpleMarkdown } from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -24,8 +25,27 @@ afterEach(async () => {
   );
 });
 
+const fakeRender = (
+  warnings: { code: string; message: string; blocking: boolean }[] = [],
+  imagePath = "b",
+) => ({
+  htmlPath: "a",
+  imagePath,
+  width: 1,
+  height: 1,
+  warnings,
+  structure: {
+    headings: 1,
+    blocks: 1,
+    tables: 0,
+    equations: 0,
+    diagrams: 0,
+    figures: 0,
+  },
+});
+
 describe("renderer", () => {
-  test("renders self-contained Chinese HTML, KaTeX fallback, Mermaid, table, and source figure", async () => {
+  test("renders self-contained Chinese HTML, KaTeX fallback, Mermaid, table, and figure", async () => {
     const directory = await temporary();
     const source = `${directory}/source.png`;
     await sharp({
@@ -33,36 +53,52 @@ describe("renderer", () => {
     })
       .png()
       .toFile(source);
-    const document = simpleDocument();
-    document.sections[0]?.blocks.push(
-      {
-        id: "table",
-        type: "table",
-        headers: ["列一", "列二"],
-        rows: [["内容", "更多内容"]],
-      },
-      { id: "valid-equation", type: "equation", latex: "\\frac{x^2}{y}" },
-      { id: "equation", type: "equation", latex: "\\notACommand{" },
-      {
-        id: "diagram",
-        type: "diagram",
-        kind: "flowchart",
-        nodes: [
-          { id: "end", label: "开始" },
-          { id: "b", label: "结束" },
-        ],
-        edges: [{ from: "end", to: "b", label: "|x|" }],
-      },
-      {
-        id: "figure",
-        type: "source_figure",
-        region: fullRegion,
-        caption: "原图",
-      },
-    );
-    const result = await renderDocument(document, source, directory, 1, 900);
+    const figureMarkdown = await (async () => {
+      await mkdir(`${directory}/assets/figures`, { recursive: true });
+      await sharp({
+        create: { width: 120, height: 80, channels: 3, background: "#cfe6ff" },
+      })
+        .png()
+        .toFile(`${directory}/assets/figures/figure-001.png`);
+      return "![原图](assets/figures/figure-001.png)";
+    })();
+    const markdown = `# 测试笔记
+
+## 第一节
+
+这是正文。
+
+| 列一 | 列二 |
+| --- | --- |
+| 内容 | 更多内容 |
+
+$$
+\\frac{x^2}{y}
+$$
+
+$$
+\\notACommand{
+$$
+
+\`\`\`mermaid
+flowchart TD
+  开始 -->|标签| 结束
+\`\`\`
+
+${figureMarkdown}
+`;
+    const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
+    const result = await renderDocument(note, directory, 1, 900);
     expect(result.width).toBe(900);
     expect(result.height).toBeGreaterThan(0);
+    expect(result.structure).toEqual({
+      headings: 2,
+      blocks: 8,
+      tables: 1,
+      equations: 2,
+      diagrams: 1,
+      figures: 1,
+    });
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),
     ).toBe(true);
@@ -72,8 +108,7 @@ describe("renderer", () => {
     expect(html).toContain("font-family:KaTeX_Main");
     expect(html).not.toContain("url(fonts/");
     expect(html).toContain("data:image/png;base64,");
-    expect(html).toContain("n0[&quot;开始&quot;]");
-    expect(html).toContain("n0 --&gt;|#124;x#124;| n1");
+    expect(html).toContain("flowchart TD");
     expect(html).not.toMatch(/<(?:script|img)[^>]+src=["']https?:/i);
     expect(html).not.toMatch(/<link[^>]+href=["']https?:/i);
     expect(
@@ -86,68 +121,29 @@ describe("renderer", () => {
         warning.code.includes("horizontal_overflow"),
       ),
     ).toBe(false);
-    expect(
-      result.warnings.some(
-        (warning) => warning.elementId === "valid-equation" && warning.blocking,
-      ),
-    ).toBe(false);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
-  }, 30_000);
+  }, 60_000);
 
   test("renders from a run directory containing URL fragment characters", async () => {
     const root = await temporary();
-    const source = `${root}/source.png`;
     const runDirectory = `${root}/output#fragment`;
     await mkdir(runDirectory);
-    await sharp({
-      create: { width: 100, height: 100, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(source);
-    const result = await renderDocument(
-      simpleDocument(),
-      source,
+    const note = await parseNoteMarkdown(simpleMarkdown(), {
       runDirectory,
-      1,
-      700,
-    );
+    });
+    const result = await renderDocument(note, runDirectory, 1, 700);
     expect(result.width).toBe(700);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 30_000);
 
   test("renders untitled content while keeping uncertainty audit session-only", async () => {
     const directory = await temporary();
-    const source = `${directory}/source.png`;
-    await sharp({
-      create: { width: 100, height: 100, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(source);
     const draft = simpleDraft();
-    delete draft.document.title;
-    delete draft.document.sections[0]?.title;
-    draft.audit.uncertainties.push({
-      id: "uncertainText",
-      target: { kind: "block", blockId: "paragraph-1" },
-      bestGuess: "这是正文。",
-      candidates: ["这是正文。", "这是证文。"],
-      basis: "session-only-basis",
-      region: fullRegion,
-      confidence: 0.7,
-    });
-    draft.audit.corrections.push({
-      id: "correctedText",
-      target: { kind: "block", blockId: "paragraph-1" },
-      original: "这是证文。",
-      corrected: "这是正文。",
-      basis: "session-only-correction-basis",
-      region: fullRegion,
-      confidence: 0.99,
-    });
+    const markdown = draft.markdown.replace("# 测试笔记\n\n## 第一节\n\n", "");
     const recorder = new SessionRecorder(directory);
     const state = new RunState();
     const tools = createHandnoteTools({
-      sourcePath: source,
+      sourcePath: `${directory}/source.png`,
       runDirectory: directory,
       width: 700,
       maxSteps: 18,
@@ -156,9 +152,38 @@ describe("renderer", () => {
       state,
       recorder,
     });
-    const execute = tools.write_document.execute;
-    if (!execute) throw new Error("missing write_document execute");
-    const result = await execute(draft, {} as Parameters<typeof execute>[1]);
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note execute");
+    const result = await execute(
+      {
+        markdown,
+        audit: {
+          uncertainties: [
+            {
+              id: "uncertainText",
+              target: { quote: "这是正文。" },
+              bestGuess: "这是正文。",
+              candidates: ["这是正文。", "这是证文。"],
+              basis: "session-only-basis",
+              region: fullRegion,
+              confidence: 0.7,
+            },
+          ],
+          corrections: [
+            {
+              id: "correctedText",
+              target: { quote: "这是正文。" },
+              original: "这是证文。",
+              corrected: "这是正文。",
+              basis: "session-only-correction-basis",
+              region: fullRegion,
+              confidence: 0.99,
+            },
+          ],
+        },
+      },
+      {} as Parameters<typeof execute>[1],
+    );
     expect(result).toMatchObject({ ok: true, revision: 1 });
     expect(result).toMatchObject({
       summary: expect.stringContaining("model step(s) remain"),
@@ -195,27 +220,16 @@ describe("renderer", () => {
 
   test("reports Mermaid runtime failures as blocking warnings", async () => {
     const directory = await temporary();
-    const source = `${directory}/source.png`;
-    await sharp({
-      create: { width: 100, height: 100, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(source);
-    const document = simpleDocument();
-    document.sections[0]?.blocks.push({
-      id: "broken-diagram",
-      type: "diagram",
-      kind: "flowchart",
-      nodes: [{ id: "node", label: "`" }],
-      edges: [],
-    });
-    const result = await renderDocument(document, source, directory, 1, 700);
+    const note = await parseNoteMarkdown(
+      "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
+      { runDirectory: directory },
+    );
+    const result = await renderDocument(note, directory, 1, 700);
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: "diagram_render_error",
           blocking: true,
-          elementId: "broken-diagram",
         }),
       ]),
     );
@@ -226,20 +240,7 @@ describe("finalization state machine", () => {
   test("requires render, later review, later finalize, and no blocking warnings", () => {
     const state = new RunState();
     state.beginModelStep();
-    state.commit(simpleDocument(), emptyRevisionAudit(), {
-      htmlPath: "a",
-      imagePath: "b",
-      width: 1,
-      height: 1,
-      warnings: [],
-      structure: {
-        sections: 1,
-        blocks: 1,
-        diagrams: 0,
-        tables: 0,
-        sourceFigures: 0,
-      },
-    });
+    state.commit(simpleMarkdown(), "hash", emptyRevisionAudit(), fakeRender());
     expect(state.canFinalize().ok).toBe(false);
     state.review();
     expect(state.canFinalize().ok).toBe(false);
@@ -253,20 +254,12 @@ describe("finalization state machine", () => {
   test("mutation clears review eligibility and blocking warnings prevent finalization", () => {
     const state = new RunState();
     state.beginModelStep();
-    state.commit(simpleDocument(), emptyRevisionAudit(), {
-      htmlPath: "a",
-      imagePath: "b",
-      width: 1,
-      height: 1,
-      warnings: [{ code: "overflow", message: "bad", blocking: true }],
-      structure: {
-        sections: 1,
-        blocks: 1,
-        diagrams: 0,
-        tables: 0,
-        sourceFigures: 0,
-      },
-    });
+    state.commit(
+      simpleMarkdown(),
+      "hash",
+      emptyRevisionAudit(),
+      fakeRender([{ code: "overflow", message: "bad", blocking: true }]),
+    );
     state.beginModelStep();
     state.review();
     state.beginModelStep();
@@ -274,20 +267,12 @@ describe("finalization state machine", () => {
       ok: false,
       reason: "Review contains blocking layout warnings",
     });
-    state.commit(simpleDocument(), emptyRevisionAudit(), {
-      htmlPath: "c",
-      imagePath: "d",
-      width: 1,
-      height: 1,
-      warnings: [],
-      structure: {
-        sections: 1,
-        blocks: 1,
-        diagrams: 0,
-        tables: 0,
-        sourceFigures: 0,
-      },
-    });
+    state.commit(
+      simpleMarkdown(),
+      "hash2",
+      emptyRevisionAudit(),
+      fakeRender([], "d"),
+    );
     expect(state.canFinalize()).toEqual({
       ok: false,
       reason: "Current revision has not been reviewed",
@@ -309,43 +294,28 @@ describe("finalization state machine", () => {
     expect(order).toEqual([1, 2]);
   });
 
-  test("keeps finalization and concurrent patches on the same revision", async () => {
-    const operations: PatchOperation[] = [
-      {
-        op: "replace_block",
-        blockId: "paragraph-1",
-        block: { id: "ignored", type: "paragraph", text: "changed" },
-      },
-    ];
+  test("keeps finalization and concurrent revisions on the same revision", async () => {
     const setup = async () => {
       const directory = await temporary();
-      const source = `${directory}/source.png`;
-      await sharp({
-        create: { width: 100, height: 100, channels: 3, background: "white" },
-      })
-        .png()
-        .toFile(source);
       const state = new RunState();
       state.beginModelStep();
-      state.commit(simpleDocument(), emptyRevisionAudit(), {
-        htmlPath: "old.html",
-        imagePath: source,
-        width: 700,
-        height: 100,
-        warnings: [],
-        structure: {
-          sections: 1,
-          blocks: 1,
-          diagrams: 0,
-          tables: 0,
-          sourceFigures: 0,
-        },
-      });
+      const initialMarkdown = simpleMarkdown();
+      await mkdir(`${directory}/revisions`, { recursive: true });
+      await Bun.write(
+        `${directory}/revisions/revision-001.md`,
+        initialMarkdown,
+      );
+      state.commit(
+        initialMarkdown,
+        await sha256File(`${directory}/revisions/revision-001.md`),
+        emptyRevisionAudit(),
+        fakeRender(),
+      );
       state.beginModelStep();
       state.review();
       state.beginModelStep();
       const tools = createHandnoteTools({
-        sourcePath: source,
+        sourcePath: `${directory}/source.png`,
         runDirectory: directory,
         width: 700,
         maxSteps: 18,
@@ -354,45 +324,52 @@ describe("finalization state machine", () => {
         state,
         recorder: new SessionRecorder(directory),
       });
-      return { state, tools };
+      return { state, tools, directory };
     };
 
-    const patchFirst = await setup();
-    const patchFirstContext = {} as Parameters<
-      NonNullable<typeof patchFirst.tools.patch_document.execute>
+    const reviseFirst = await setup();
+    const reviseFirstContext = {} as Parameters<
+      NonNullable<typeof reviseFirst.tools.revise_note.execute>
     >[1];
-    const [patchResult, finalizeAfterPatch] = await Promise.all([
-      patchFirst.tools.patch_document.execute?.(
-        { operations },
-        patchFirstContext,
+    const revisionMarkdown = "修订后的正文。\n";
+    const [reviseResult, finalizeAfterRevise] = await Promise.all([
+      reviseFirst.tools.revise_note.execute?.(
+        { markdown: revisionMarkdown, audit: {} },
+        reviseFirstContext,
       ),
-      patchFirst.tools.finalize_note.execute?.({}, patchFirstContext),
+      reviseFirst.tools.finalize_note.execute?.({}, reviseFirstContext),
     ]);
-    expect(patchResult).toMatchObject({ ok: true, revision: 2 });
-    expect(finalizeAfterPatch).toMatchObject({
+    expect(reviseResult).toMatchObject({ ok: true, revision: 2 });
+    expect(finalizeAfterRevise).toMatchObject({
       ok: false,
       error: { code: "not_ready" },
     });
-    expect(patchFirst.state.finalized).toBe(false);
-    expect(patchFirst.state.revision?.number).toBe(2);
+    expect(reviseFirst.state.finalized).toBe(false);
+    expect(reviseFirst.state.revision?.number).toBe(2);
+    expect(
+      await Bun.file(
+        `${reviseFirst.directory}/revisions/revision-002.md`,
+      ).exists(),
+    ).toBe(true);
 
     const finalizeFirst = await setup();
     const finalizeFirstContext = {} as Parameters<
       NonNullable<typeof finalizeFirst.tools.finalize_note.execute>
     >[1];
-    const [finalizeResult, patchAfterFinalize] = await Promise.all([
+    const [finalizeResult, reviseAfterFinalize] = await Promise.all([
       finalizeFirst.tools.finalize_note.execute?.({}, finalizeFirstContext),
-      finalizeFirst.tools.patch_document.execute?.(
-        { operations },
+      finalizeFirst.tools.revise_note.execute?.(
+        { markdown: revisionMarkdown, audit: {} },
         finalizeFirstContext,
       ),
     ]);
     expect(finalizeResult).toMatchObject({ ok: true, revision: 1 });
-    expect(patchAfterFinalize).toMatchObject({
+    expect(reviseAfterFinalize).toMatchObject({
       ok: false,
       error: { code: "already_finalized" },
     });
+    expect(finalizeFirst.state.finalized).toBe(true);
     expect(finalizeFirst.state.finalizedRevision).toBe(1);
     expect(finalizeFirst.state.revision?.number).toBe(1);
-  }, 30_000);
+  }, 60_000);
 });

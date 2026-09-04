@@ -81,7 +81,7 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     recorder,
   });
   const script = [
-    { name: "write_document", input: JSON.stringify(simpleDraft()) },
+    { name: "write_note", input: JSON.stringify(simpleDraft()) },
     { name: "review_render", input: "{}" },
     { name: "finalize_note", input: "{}" },
   ];

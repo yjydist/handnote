@@ -11,12 +11,13 @@ export function createReviewRenderTool(
   return createTool({
     id: "review_render",
     description:
-      "Return the current revision render and precise layout warnings. Compare it with the source for completeness, source-only titles, faithful wording, and absence of summaries, observer commentary, or visible audit material. Batch all discovered fixes into one patch; source regions cannot fix layout.",
+      "Return the current revision render and precise layout warnings. Compare it with the source for completeness, source-only titles, faithful wording, and absence of summaries, observer commentary, or visible audit material. Batch all discovered fixes into one full-document revision; source regions cannot fix layout.",
     inputSchema: z.object({}).strict(),
     outputSchema: z.union([
       z.object({
         ok: z.literal(true),
         revision: z.number(),
+        markdownSha256: z.string(),
         path: z.string(),
         mimeType: z.literal("image/png"),
         warnings: z.array(z.unknown()),
@@ -53,11 +54,12 @@ export function createReviewRenderTool(
           const output = {
             ok: true as const,
             revision: revision.number,
+            markdownSha256: revision.markdownSha256,
             path: revision.render.imagePath,
             mimeType: "image/png" as const,
             warnings: revision.render.warnings,
             structure: revision.render.structure,
-            summary: `Review revision ${revision.number}; ${layoutSummary(revision.render.warnings)}; ${remainingSteps(context)}. If source comparison finds no content issue, call finalize_note in the next model step without another patch.`,
+            summary: `Review revision ${revision.number}; ${layoutSummary(revision.render.warnings)}; ${remainingSteps(context)}. If source comparison finds no content issue, call finalize_note in the next model step without another revision.`,
           };
           context.recorder.record("render.reviewed", output);
           return output;

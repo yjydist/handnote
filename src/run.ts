@@ -28,9 +28,9 @@ export interface RunManifest {
   stopReason: string;
   input: { path: string; sha256?: string; original?: string };
   final?: {
-    document: string;
+    markdown: string;
     image: string;
-    documentSha256: string;
+    markdownSha256: string;
     imageSha256: string;
     revision: number;
   };
@@ -267,12 +267,9 @@ export async function executeRun(
   let final: RunManifest["final"];
   try {
     if ((status === "complete" || status === "partial") && state.revision) {
-      const documentPath = `${allocated.path}/note.json`;
+      const markdownPath = `${allocated.path}/note.md`;
       const imagePath = `${allocated.path}/note.png`;
-      await atomicWrite(
-        documentPath,
-        `${JSON.stringify(state.revision.document, null, 2)}\n`,
-      );
+      await atomicWrite(markdownPath, state.revision.markdown);
       await atomicWrite(
         imagePath,
         new Uint8Array(
@@ -280,9 +277,9 @@ export async function executeRun(
         ),
       );
       final = {
-        document: "note.json",
+        markdown: "note.md",
         image: "note.png",
-        documentSha256: await sha256File(documentPath),
+        markdownSha256: await sha256File(markdownPath),
         imageSha256: await sha256File(imagePath),
         revision: state.revision.number,
       };
@@ -301,7 +298,7 @@ export async function executeRun(
     stopReason = terminalError.kind;
     final = undefined;
     await Promise.all([
-      rm(`${allocated.path}/note.json`, { force: true }),
+      rm(`${allocated.path}/note.md`, { force: true }),
       rm(`${allocated.path}/note.png`, { force: true }),
     ]);
     recorder.record("run.error", {
