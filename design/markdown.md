@@ -11,7 +11,7 @@ GFM Markdown 是笔记的 canonical 持久化格式 (模型的心智模型与磁
 | code | 触发条件 |
 |:----:|:----:|
 | `markdown_too_large` | 超过 200_000 字符 (`maxMarkdownLength`) |
-| `empty_document` | mdast 不含可见文本、非空普通 code、任务状态、本地图片或等待渲染确认的 math / Mermaid；空 heading / code / list / table 与纯分隔线均为空文档 |
+| `empty_document` | 第一阶段 mdast 不含可见文本、非空普通 code、任务状态、本地图片或等待渲染确认的 math / Mermaid；第二阶段确认 math 无语义文本且 Mermaid 无有效祖先可见的标签或图形. 空 heading / code / list / table、纯分隔线、仅 diagram type 的空 Mermaid 均为空文档 |
 | `frontmatter_unsupported` | 首行 `---` (文本预检, 不用 remark-frontmatter) |
 | `raw_html` | 任何 mdast `html` 节点 (含段内 inline HTML), 以及 mermaid code block 内的 HTML markup (含普通 / 闭合 / 自闭合 / 大小写 / 跨行属性标签, 注释, 声明, CDATA 与 processing instruction) |
 | `link_not_allowed` | 任何 `link` (含 GFM autolink literal, 裸 URL 即 link), 非图片 `definition`, footnote reference/definition; 含 mermaid code block 内行首或分号分隔的 click 指令 / markdown 链接 / 任意大小写的 `img` 节点属性 / URL scheme `https?://` (静态文本校验) |

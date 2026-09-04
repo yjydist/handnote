@@ -5,6 +5,11 @@ export interface AuditTextEvidence {
   mathTextBlocks: readonly string[];
 }
 
+export interface RenderedSemanticEvidence extends AuditTextEvidence {
+  forbiddenMermaidContent: boolean;
+  mermaidVisibleBlocks: readonly boolean[];
+}
+
 export interface MarkdownSemantics {
   blocks: string[];
   hasStaticContent: boolean;
@@ -103,5 +108,17 @@ export function hasPotentialSemanticContent(tree: Root): boolean {
     semantics.hasStaticContent ||
     semantics.mermaidCount > 0 ||
     semantics.mathCount > 0
+  );
+}
+
+export function hasRenderedSemanticContent(
+  tree: Root,
+  evidence: RenderedSemanticEvidence,
+): boolean {
+  const semantics = analyzeMarkdownSemantics(tree, evidence);
+  return (
+    semantics.hasStaticContent ||
+    evidence.mathTextBlocks.some((value) => foldWhitespace(value).length > 0) ||
+    evidence.mermaidVisibleBlocks.some(Boolean)
   );
 }

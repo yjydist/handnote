@@ -7,6 +7,7 @@ import {
   validateAuditTargets,
 } from "../document.ts";
 import { MarkdownValidationError, parseNoteMarkdown } from "../markdown.ts";
+import { hasRenderedSemanticContent } from "../markdown-semantics.ts";
 import { renderDocument } from "../renderer.ts";
 import { atomicWrite, sha256 } from "../utils.ts";
 import type { ToolRuntime } from "./shared.ts";
@@ -95,13 +96,27 @@ export async function commitNoteDraft(
     );
   if (!note) throw new Error("parseNoteMarkdown returned without a value");
   const number = (context.state.revision?.number ?? 0) + 1;
-  const { render, auditText } = await renderDocument(
+  const { render, semanticEvidence } = await renderDocument(
     note,
     context.runDirectory,
     number,
     context.width,
   );
-  const auditTargetErrors = validateAuditTargets(note.tree, audit, auditText);
+  if (semanticEvidence.forbiddenMermaidContent)
+    return toolError(
+      "invalid_markdown",
+      "link_not_allowed: Links, embedded media, and event handlers are not allowed in rendered Mermaid diagrams",
+    );
+  if (!hasRenderedSemanticContent(note.tree, semanticEvidence))
+    return toolError(
+      "invalid_markdown",
+      "empty_document: Markdown document must contain visible content",
+    );
+  const auditTargetErrors = validateAuditTargets(
+    note.tree,
+    audit,
+    semanticEvidence,
+  );
   if (auditTargetErrors.length > 0)
     return toolError("invalid_audit", auditTargetErrors.join("; "));
   const markdownSha256 = sha256(parsed.markdown);

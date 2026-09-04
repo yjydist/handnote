@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { HandnoteError } from "./errors.ts";
 import type { NoteMarkdown } from "./markdown.ts";
 import { noteMarkdownToHtml } from "./markdown.ts";
-import type { AuditTextEvidence } from "./markdown-semantics.ts";
+import type { RenderedSemanticEvidence } from "./markdown-semantics.ts";
 import { atomicWrite } from "./utils.ts";
 
 export interface LayoutWarning {
@@ -38,7 +38,7 @@ export interface RenderResult {
 
 export interface RenderDocumentResult {
   render: RenderResult;
-  auditText: AuditTextEvidence;
+  semanticEvidence: RenderedSemanticEvidence;
 }
 
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -119,7 +119,7 @@ async function screenshotTall(
   width: number;
   height: number;
   warnings: LayoutWarning[];
-  auditText: AuditTextEvidence;
+  semanticEvidence: RenderedSemanticEvidence;
 }> {
   const context = await browser.newContext({
     viewport: { width, height: 900 },
@@ -149,37 +149,89 @@ async function screenshotTall(
       ),
     );
     const warnings: LayoutWarning[] = [];
-    const mermaidTextBlocks = Array.from(
+    const effectivelyVisible = (
+      element: Element,
+      areaRequired: boolean,
+    ): boolean => {
+      const rect = element.getBoundingClientRect();
+      return (
+        element.checkVisibility({
+          checkOpacity: true,
+          checkVisibilityCSS: true,
+        }) &&
+        (areaRequired
+          ? rect.width > 0 && rect.height > 0
+          : rect.width > 0 || rect.height > 0)
+      );
+    };
+    const mermaidBlocks = Array.from(
       document.querySelectorAll("pre.mermaid"),
       (block) => {
-        if (block.querySelector(".error-icon")) return [];
-        return Array.from(
-          block.querySelectorAll<SVGElement>("svg text, svg foreignObject"),
-        )
-          .filter(
-            (element) =>
-              element.tagName.toLowerCase() === "foreignobject" ||
-              !element.closest("foreignObject"),
-          )
-          .map((element) => {
-            const rect = element.getBoundingClientRect();
-            const style = getComputedStyle(element);
-            return {
-              text: element.textContent ?? "",
-              top: rect.top,
-              left: rect.left,
-              visible:
-                rect.width > 0 &&
-                rect.height > 0 &&
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                style.opacity !== "0",
-            };
-          })
-          .filter((label) => label.visible && label.text.trim().length > 0)
-          .sort((left, right) => left.top - right.top || left.left - right.left)
-          .map((label) => label.text);
+        const renderError = block.querySelector(".error-icon") !== null;
+        const labels = renderError
+          ? []
+          : Array.from(
+              block.querySelectorAll<SVGElement>("svg text, svg foreignObject"),
+            )
+              .filter(
+                (element) =>
+                  (element.tagName.toLowerCase() === "foreignobject" ||
+                    !element.closest("foreignObject")) &&
+                  effectivelyVisible(element, true),
+              )
+              .map((element) => {
+                const rect = element.getBoundingClientRect();
+                return {
+                  text: element.textContent ?? "",
+                  top: rect.top,
+                  left: rect.left,
+                };
+              })
+              .filter((label) => label.text.trim().length > 0)
+              .sort(
+                (left, right) => left.top - right.top || left.left - right.left,
+              )
+              .map((label) => label.text);
+        const visibleGraphic = Array.from(
+          block.querySelectorAll<SVGElement>(
+            "svg path, svg rect, svg circle, svg ellipse, svg line, svg polyline, svg polygon",
+          ),
+        ).some((element) => {
+          if (element.closest("defs, marker, clipPath, mask, pattern, symbol"))
+            return false;
+          if (!effectivelyVisible(element, false)) return false;
+          const style = getComputedStyle(element);
+          const fillVisible =
+            style.fill !== "none" &&
+            style.fill !== "transparent" &&
+            Number.parseFloat(style.fillOpacity) > 0;
+          const strokeVisible =
+            style.stroke !== "none" &&
+            style.stroke !== "transparent" &&
+            Number.parseFloat(style.strokeOpacity) > 0 &&
+            Number.parseFloat(style.strokeWidth) > 0;
+          return fillVisible || strokeVisible;
+        });
+        const forbidden =
+          block.querySelector("a[href], img, image") !== null ||
+          Array.from(block.querySelectorAll("*")).some((element) =>
+            Array.from(element.attributes).some((attribute) =>
+              attribute.name.toLowerCase().startsWith("on"),
+            ),
+          );
+        return {
+          forbidden,
+          labels,
+          visibleContent: renderError || labels.length > 0 || visibleGraphic,
+        };
       },
+    );
+    const mermaidTextBlocks = mermaidBlocks.map((block) => block.labels);
+    const mermaidVisibleBlocks = mermaidBlocks.map(
+      (block) => block.visibleContent,
+    );
+    const forbiddenMermaidContent = mermaidBlocks.some(
+      (block) => block.forbidden,
     );
     const mathTextBlocks = Array.from(
       document.querySelectorAll<HTMLElement>(".katex, .katex-error"),
@@ -265,7 +317,12 @@ async function screenshotTall(
       width,
       height,
       warnings,
-      auditText: { mermaidTextBlocks, mathTextBlocks },
+      semanticEvidence: {
+        forbiddenMermaidContent,
+        mermaidTextBlocks,
+        mermaidVisibleBlocks,
+        mathTextBlocks,
+      },
     };
   });
   const segmentHeight = 12_000;
@@ -329,7 +386,7 @@ export async function renderDocument(
         warnings,
         structure: note.structure,
       },
-      auditText: screenshot.auditText,
+      semanticEvidence: screenshot.semanticEvidence,
     };
   } catch (error) {
     if (error instanceof HandnoteError) throw error;

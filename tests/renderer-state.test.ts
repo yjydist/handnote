@@ -97,7 +97,7 @@ flowchart TD
 ${figureMarkdown}
 `;
     const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
-    const { render: result, auditText } = await renderDocument(
+    const { render: result, semanticEvidence } = await renderDocument(
       note,
       directory,
       1,
@@ -113,8 +113,10 @@ ${figureMarkdown}
       diagrams: 1,
       figures: 1,
     });
-    expect(auditText).toEqual({
+    expect(semanticEvidence).toEqual({
+      forbiddenMermaidContent: false,
       mermaidTextBlocks: [["开始", "标签", "结束"]],
+      mermaidVisibleBlocks: [true],
       mathTextBlocks: ["x2y", "\\notACommand{"],
     });
     expect(
@@ -287,7 +289,7 @@ ${figureMarkdown}
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const { render: result, auditText } = await renderDocument(
+    const { render: result, semanticEvidence } = await renderDocument(
       note,
       directory,
       1,
@@ -301,7 +303,12 @@ ${figureMarkdown}
         }),
       ]),
     );
-    expect(auditText).toEqual({ mermaidTextBlocks: [[]], mathTextBlocks: [] });
+    expect(semanticEvidence).toEqual({
+      forbiddenMermaidContent: false,
+      mermaidTextBlocks: [[]],
+      mermaidVisibleBlocks: [true],
+      mathTextBlocks: [],
+    });
   }, 30_000);
 
   test("blocks non-file browser requests during rendering", async () => {
@@ -347,6 +354,57 @@ ${figureMarkdown}
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  }, 30_000);
+
+  test("collects only effectively visible Mermaid labels", async () => {
+    const directory = await temporary();
+    const note = await parseNoteMarkdown(
+      [
+        "```mermaid",
+        "flowchart TD",
+        '  shown["Shown"]',
+        '  opacity["Opacity"]',
+        '  hidden["Hidden"]',
+        '  absent["Absent"]',
+        '  partial["Partial"]',
+        "  classDef opacityClass opacity:0",
+        "  classDef hiddenClass visibility:hidden",
+        "  classDef absentClass display:none",
+        "  classDef partialClass opacity:0.5",
+        "  class opacity opacityClass",
+        "  class hidden hiddenClass",
+        "  class absent absentClass",
+        "  class partial partialClass",
+        "```",
+      ].join("\n"),
+      { runDirectory: directory },
+    );
+    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
+
+    expect(semanticEvidence).toMatchObject({
+      forbiddenMermaidContent: false,
+      mermaidTextBlocks: [["Shown", "Partial"]],
+      mermaidVisibleBlocks: [true],
+    });
+  }, 30_000);
+
+  test("reports forbidden content found only in rendered Mermaid output", async () => {
+    const directory = await temporary();
+    const note = await parseNoteMarkdown(
+      '```mermaid\nflowchart TD\n  a["Safe"]\n```',
+      { runDirectory: directory },
+    );
+    const mermaid = note.tree.children.find(
+      (node) => node.type === "code" && node.lang === "mermaid",
+    );
+    if (!mermaid || mermaid.type !== "code")
+      throw new Error("missing Mermaid node");
+    // Deliberately bypass source validation to exercise the rendered-DOM guard.
+    mermaid.value =
+      "flowchart TD\n  a[\"<img src='data:image/png;base64,AAAA'>\"]";
+
+    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
+    expect(semanticEvidence.forbiddenMermaidContent).toBe(true);
   }, 30_000);
 
   test("allows only the exact render document file URL and data URLs", () => {

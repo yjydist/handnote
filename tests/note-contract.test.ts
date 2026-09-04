@@ -203,6 +203,9 @@ describe("note tool sequencing", () => {
       "```mermaid",
       "flowchart TD",
       '  internal_id["Visible label"] -->|Edge label| b[End]',
+      '  hidden_id["Hidden label"]',
+      "  classDef hiddenClass opacity:0",
+      "  class hidden_id hiddenClass",
       "```",
     ].join("\n");
     const uncertainty = (id: string, quote: string, occurrence?: number) => ({
@@ -223,6 +226,7 @@ describe("note tool sequencing", () => {
             uncertainty("u1", "flowchart TD"),
             uncertainty("u2", "internal_id"),
             uncertainty("u3", "Visible label Edge label"),
+            uncertainty("u6", "Hidden label"),
           ],
         },
       },
@@ -234,7 +238,7 @@ describe("note tool sequencing", () => {
     });
     const rejectedMessage = (rejected as { error?: { message?: string } }).error
       ?.message;
-    for (const id of ["u1", "u2", "u3"])
+    for (const id of ["u1", "u2", "u3", "u6"])
       expect(rejectedMessage).toContain(`Audit ${id} quote not found`);
     expect(state.revision).toBeUndefined();
     expect(
@@ -255,10 +259,38 @@ describe("note tool sequencing", () => {
     );
     expect(accepted).toMatchObject({ ok: true, revision: 1 });
     expect(state.revision?.audit.uncertainties).toHaveLength(2);
-    expect(state.revision?.render).not.toHaveProperty("auditText");
+    expect(state.revision?.render).not.toHaveProperty("semanticEvidence");
     const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
-    expect(session).not.toContain("auditText");
+    expect(session).not.toContain("semanticEvidence");
   });
+
+  test("write_note rejects a Mermaid declaration with no rendered content", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    state.beginModelStep();
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+
+    const result = await execute(
+      {
+        markdown: "```mermaid\nflowchart TD\n```",
+        audit: {},
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "invalid_markdown",
+        message: expect.stringContaining("empty_document"),
+      },
+    });
+    expect(state.revision).toBeUndefined();
+    expect(
+      await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+    ).toBe(false);
+  }, 30_000);
 
   test("write_note validates audit targets against rendered math text", async () => {
     const directory = await temporary();
@@ -330,9 +362,9 @@ describe("note tool sequencing", () => {
       {} as Parameters<typeof execute>[1],
     );
     expect(accepted).toMatchObject({ ok: true, revision: 1 });
-    expect(state.revision?.render).not.toHaveProperty("auditText");
+    expect(state.revision?.render).not.toHaveProperty("semanticEvidence");
     const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
-    expect(session).not.toContain("auditText");
+    expect(session).not.toContain("semanticEvidence");
   });
 
   test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
