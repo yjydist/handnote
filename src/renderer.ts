@@ -103,10 +103,17 @@ async function screenshotTall(
   imagePath: string,
   width: number,
 ): Promise<{ width: number; height: number; warnings: LayoutWarning[] }> {
-  const page = await browser.newPage({
+  const context = await browser.newContext({
     viewport: { width, height: 900 },
     deviceScaleFactor: 1,
   });
+  await context.route("**/*", async (route) => {
+    const url = route.request().url();
+    if (url.startsWith("file://") || url.startsWith("data:"))
+      return route.continue();
+    return route.abort();
+  });
+  const page = await context.newPage();
   await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "load" });
   await page.waitForFunction(
     () =>
@@ -220,6 +227,7 @@ async function screenshotTall(
       .toFile(imagePath);
   }
   await page.close();
+  await context.close();
   return result;
 }
 

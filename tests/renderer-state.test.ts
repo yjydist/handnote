@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import type { Server } from "node:http";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkParse from "remark-parse";
 import sharp from "sharp";
+import { unified } from "unified";
 import { emptyRevisionAudit } from "../src/document.ts";
+import type { NoteMarkdown } from "../src/markdown.ts";
 import { parseNoteMarkdown } from "../src/markdown.ts";
 import { renderDocument } from "../src/renderer.ts";
 import { SessionRecorder } from "../src/session.ts";
@@ -233,6 +240,46 @@ ${figureMarkdown}
         }),
       ]),
     );
+  }, 30_000);
+
+  test("blocks non-file browser requests during rendering", async () => {
+    const directory = await temporary();
+    let requests = 0;
+    const server: Server = createServer(() => {
+      requests++;
+    }).listen(0);
+    const port = (server.address() as { port: number }).port;
+    // Bypass parseNoteMarkdown validation on purpose: the renderer request
+    // allowlist must also hold when upstream validation is ever bypassed.
+    const markdown = `# 测试笔记\n\n<img src="http://127.0.0.1:${port}/x.png" alt="probe">\n`;
+    const tree = unified()
+      .use(remarkParse)
+      .use(remarkGfm)
+      .use(remarkMath)
+      .parse(markdown) as NoteMarkdown["tree"];
+    const note: NoteMarkdown = {
+      markdown,
+      tree,
+      structure: {
+        headings: 1,
+        blocks: 2,
+        tables: 0,
+        equations: 0,
+        diagrams: 0,
+        figures: 0,
+      },
+      mathWarnings: [],
+    };
+    try {
+      const result = await renderDocument(note, directory, 1, 700);
+      expect(result.width).toBe(700);
+      expect(await Bun.file(result.imagePath).exists()).toBe(true);
+      expect(requests).toBe(0);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   }, 30_000);
 });
 
