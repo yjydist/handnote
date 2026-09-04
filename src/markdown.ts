@@ -77,27 +77,29 @@ const startLine = (node: LocatedNode): number | undefined =>
 
 function validateIssues(tree: Root): MarkdownIssue[] {
   const issues: MarkdownIssue[] = [];
-  const add = (code: string, message: string, node: LocatedNode) => {
+  const seen = new Set<string>();
+  const addUnique = (code: string, message: string, node: LocatedNode) => {
     const line = startLine(node);
+    const key = `${code}:${line ?? 0}`;
+    if (seen.has(key)) return;
+    seen.add(key);
     issues.push({ code, message, ...(line ? { line } : {}) });
   };
-  for (const node of tree.children) {
+  visit(tree, (node) => {
     if (node.type === "html")
-      add(
+      addUnique(
         "raw_html",
         "Raw HTML is not allowed; express the content in GFM syntax",
         node,
       );
     if (node.type === "definition")
-      add(
+      addUnique(
         "link_not_allowed",
         "Link definitions are not allowed; write URLs as inline code instead",
         node,
       );
-  }
-  visit(tree, (node) => {
     if (node.type === "link")
-      add(
+      addUnique(
         "link_not_allowed",
         "Links are not allowed; write URLs as inline code instead",
         node,
@@ -105,7 +107,7 @@ function validateIssues(tree: Root): MarkdownIssue[] {
     if (node.type === "image") {
       const url = (node as { url?: string }).url ?? "";
       if (!figurePathPattern.test(url))
-        add(
+        addUnique(
           "invalid_image_path",
           `Image path must match assets/figures/<name>.png: ${url}`,
           node,
