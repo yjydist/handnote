@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
+import type { AuditTextEvidence } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import type { NoteMarkdown } from "./markdown.ts";
 import { noteMarkdownToHtml } from "./markdown.ts";
@@ -37,7 +38,7 @@ export interface RenderResult {
 
 export interface RenderDocumentResult {
   render: RenderResult;
-  mermaidTextBlocks: string[][];
+  auditText: AuditTextEvidence;
 }
 
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -118,7 +119,7 @@ async function screenshotTall(
   width: number;
   height: number;
   warnings: LayoutWarning[];
-  mermaidTextBlocks: string[][];
+  auditText: AuditTextEvidence;
 }> {
   const context = await browser.newContext({
     viewport: { width, height: 900 },
@@ -178,6 +179,18 @@ async function screenshotTall(
           .filter((label) => label.visible && label.text.trim().length > 0)
           .sort((left, right) => left.top - right.top || left.left - right.left)
           .map((label) => label.text);
+      },
+    );
+    const mathTextBlocks = Array.from(
+      document.querySelectorAll<HTMLElement>(".katex, .katex-error"),
+      (element) => {
+        if (element.classList.contains("katex-error"))
+          return element.textContent ?? "";
+        const semantics = element.querySelector("math > semantics");
+        const presentation = Array.from(semantics?.children ?? []).find(
+          (child) => child.tagName.toLowerCase() !== "annotation",
+        );
+        return presentation?.textContent ?? "";
       },
     );
     const runtime = globalThis as typeof globalThis & {
@@ -248,7 +261,12 @@ async function screenshotTall(
           ...(id ? { elementId: id } : {}),
         });
     }
-    return { width, height, warnings, mermaidTextBlocks };
+    return {
+      width,
+      height,
+      warnings,
+      auditText: { mermaidTextBlocks, mathTextBlocks },
+    };
   });
   const segmentHeight = 12_000;
   if (result.height <= segmentHeight) {
@@ -311,7 +329,7 @@ export async function renderDocument(
         warnings,
         structure: note.structure,
       },
-      mermaidTextBlocks: screenshot.mermaidTextBlocks,
+      auditText: screenshot.auditText,
     };
   } catch (error) {
     if (error instanceof HandnoteError) throw error;

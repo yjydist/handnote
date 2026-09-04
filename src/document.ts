@@ -74,19 +74,33 @@ export type RevisionAudit = z.infer<typeof revisionAuditSchema>;
 const foldWhitespace = (value: string): string =>
   value.replace(/\s+/g, " ").trim();
 
-function phrasingText(nodes: PhrasingContent[]): string {
+export interface AuditTextEvidence {
+  mermaidTextBlocks: readonly (readonly string[])[];
+  mathTextBlocks: readonly string[];
+}
+
+interface VisibleTextState {
+  evidence?: AuditTextEvidence;
+  mermaidCount: number;
+  mathCount: number;
+}
+
+function phrasingText(
+  nodes: PhrasingContent[],
+  state: VisibleTextState,
+): string {
   return nodes
     .map((node) => {
-      if (
-        node.type === "text" ||
-        node.type === "inlineCode" ||
-        node.type === "inlineMath"
-      )
-        return node.value;
+      if (node.type === "text" || node.type === "inlineCode") return node.value;
+      if (node.type === "inlineMath") {
+        const value = state.evidence?.mathTextBlocks[state.mathCount] ?? "";
+        state.mathCount++;
+        return value;
+      }
       if (node.type === "image" || node.type === "imageReference")
         return node.alt ?? "";
       if (node.type === "break") return " ";
-      if ("children" in node) return phrasingText(node.children);
+      if ("children" in node) return phrasingText(node.children, state);
       return "";
     })
     .join("");
@@ -94,30 +108,37 @@ function phrasingText(nodes: PhrasingContent[]): string {
 
 function visibleBlocks(
   tree: Root,
-  mermaidTextBlocks: readonly (readonly string[])[] = [],
-): { blocks: string[]; mermaidCount: number } {
+  evidence?: AuditTextEvidence,
+): { blocks: string[]; mermaidCount: number; mathCount: number } {
   const blocks: string[] = [];
-  let mermaidCount = 0;
+  const state: VisibleTextState = {
+    ...(evidence ? { evidence } : {}),
+    mermaidCount: 0,
+    mathCount: 0,
+  };
   const collect = (node: RootContent | TableCell): void => {
     if (
       node.type === "heading" ||
       node.type === "paragraph" ||
       node.type === "tableCell"
     ) {
-      blocks.push(phrasingText(node.children));
+      blocks.push(phrasingText(node.children, state));
       return;
     }
     if (node.type === "code") {
       if (node.lang === "mermaid") {
-        blocks.push(...(mermaidTextBlocks[mermaidCount] ?? []));
-        mermaidCount++;
+        blocks.push(
+          ...(state.evidence?.mermaidTextBlocks[state.mermaidCount] ?? []),
+        );
+        state.mermaidCount++;
         return;
       }
       blocks.push(node.value);
       return;
     }
     if (node.type === "math") {
-      blocks.push(node.value);
+      blocks.push(state.evidence?.mathTextBlocks[state.mathCount] ?? "");
+      state.mathCount++;
       return;
     }
     if ("children" in node)
@@ -127,7 +148,8 @@ function visibleBlocks(
   for (const child of tree.children) collect(child);
   return {
     blocks: blocks.map(foldWhitespace).filter(Boolean),
-    mermaidCount,
+    mermaidCount: state.mermaidCount,
+    mathCount: state.mathCount,
   };
 }
 
@@ -154,9 +176,9 @@ function quoteOccurrences(folded: string, needle: string): number {
 function auditTargetValidation(
   tree: Root,
   audit: RevisionAudit,
-  mermaidTextBlocks?: readonly (readonly string[])[],
-): { messages: string[]; mermaidCount: number } {
-  const { blocks, mermaidCount } = visibleBlocks(tree, mermaidTextBlocks);
+  evidence?: AuditTextEvidence,
+): { messages: string[]; mermaidCount: number; mathCount: number } {
+  const { blocks, mermaidCount, mathCount } = visibleBlocks(tree, evidence);
   const folded = blocks.join("\0");
   const occurrenceCounts = new Map<string, number>();
   const messages: string[] = [];
@@ -173,15 +195,15 @@ function auditTargetValidation(
         `Audit ${item.id} quote not found (occurrence ${required})`,
       );
   }
-  return { messages, mermaidCount };
+  return { messages, mermaidCount, mathCount };
 }
 
 export function validateAuditTargets(
   tree: Root,
   audit: RevisionAudit,
-  mermaidTextBlocks: readonly (readonly string[])[],
+  evidence: AuditTextEvidence,
 ): string[] {
-  return auditTargetValidation(tree, audit, mermaidTextBlocks).messages;
+  return auditTargetValidation(tree, audit, evidence).messages;
 }
 
 export const revisionDraftSchema = z
@@ -198,7 +220,7 @@ export const revisionDraftSchema = z
       parseMarkdownTree(draft.markdown),
       draft.audit,
     );
-    if (validation.mermaidCount > 0) return;
+    if (validation.mermaidCount > 0 || validation.mathCount > 0) return;
     for (const message of validation.messages)
       ctx.addIssue({ code: "custom", message, path: ["audit"] });
   });

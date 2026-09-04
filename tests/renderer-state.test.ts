@@ -97,7 +97,7 @@ flowchart TD
 ${figureMarkdown}
 `;
     const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
-    const { render: result, mermaidTextBlocks } = await renderDocument(
+    const { render: result, auditText } = await renderDocument(
       note,
       directory,
       1,
@@ -113,7 +113,10 @@ ${figureMarkdown}
       diagrams: 1,
       figures: 1,
     });
-    expect(mermaidTextBlocks).toEqual([["开始", "标签", "结束"]]);
+    expect(auditText).toEqual({
+      mermaidTextBlocks: [["开始", "标签", "结束"]],
+      mathTextBlocks: ["x2y", "\\notACommand{"],
+    });
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),
     ).toBe(true);
@@ -284,7 +287,7 @@ ${figureMarkdown}
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const { render: result, mermaidTextBlocks } = await renderDocument(
+    const { render: result, auditText } = await renderDocument(
       note,
       directory,
       1,
@@ -298,7 +301,7 @@ ${figureMarkdown}
         }),
       ]),
     );
-    expect(mermaidTextBlocks).toEqual([[]]);
+    expect(auditText).toEqual({ mermaidTextBlocks: [[]], mathTextBlocks: [] });
   }, 30_000);
 
   test("blocks non-file browser requests during rendering", async () => {

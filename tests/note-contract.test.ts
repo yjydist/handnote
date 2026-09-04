@@ -255,9 +255,84 @@ describe("note tool sequencing", () => {
     );
     expect(accepted).toMatchObject({ ok: true, revision: 1 });
     expect(state.revision?.audit.uncertainties).toHaveLength(2);
-    expect(state.revision?.render).not.toHaveProperty("mermaidTextBlocks");
+    expect(state.revision?.render).not.toHaveProperty("auditText");
     const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
-    expect(session).not.toContain("mermaidTextBlocks");
+    expect(session).not.toContain("auditText");
+  });
+
+  test("write_note validates audit targets against rendered math text", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    state.beginModelStep();
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    const markdown = [
+      "xy",
+      "",
+      "Inline $E=mc^2$ tail.",
+      "",
+      "$$",
+      "\\frac{x}{y}",
+      "$$",
+      "",
+      "$$",
+      "\\notACommand{",
+      "$$",
+    ].join("\n");
+    const uncertainty = (id: string, quote: string, occurrence?: number) => ({
+      id,
+      target: { quote, ...(occurrence ? { occurrence } : {}) },
+      bestGuess: quote,
+      candidates: [quote, "alternative"],
+      basis: "b",
+      region: fullRegion,
+      confidence: 0.5,
+    });
+
+    const rejected = await execute(
+      {
+        markdown,
+        audit: {
+          uncertainties: [
+            uncertainty("u1", "frac"),
+            uncertainty("u2", "\\frac"),
+            uncertainty("u3", "E=mc^2"),
+            uncertainty("u4", "tail. xy"),
+          ],
+        },
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: "invalid_audit" },
+    });
+    const rejectedMessage = (rejected as { error?: { message?: string } }).error
+      ?.message;
+    for (const id of ["u1", "u2", "u3", "u4"])
+      expect(rejectedMessage).toContain(`Audit ${id} quote not found`);
+    expect(state.revision).toBeUndefined();
+    expect(
+      await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+    ).toBe(false);
+
+    const accepted = await execute(
+      {
+        markdown,
+        audit: {
+          uncertainties: [
+            uncertainty("u5", "Inline E=mc2 tail."),
+            uncertainty("u6", "xy", 2),
+            uncertainty("u7", "\\notACommand{"),
+          ],
+        },
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(accepted).toMatchObject({ ok: true, revision: 1 });
+    expect(state.revision?.render).not.toHaveProperty("auditText");
+    const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
+    expect(session).not.toContain("auditText");
   });
 
   test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
@@ -372,7 +447,7 @@ describe("quote locator validation", () => {
       "",
       "| cell | `code` |",
       "| --- | --- |",
-      "| value | $x$ |",
+      "| value | plain |",
       "",
       "![figure alt](assets/figures/figure-001.png)",
     ].join("\n");
@@ -380,7 +455,13 @@ describe("quote locator validation", () => {
       ...draft(quote),
       markdown,
     });
-    for (const quote of ["Visible heading", "cell", "code", "x", "figure alt"])
+    for (const quote of [
+      "Visible heading",
+      "cell",
+      "code",
+      "plain",
+      "figure alt",
+    ])
       expect(revisionDraftSchema.safeParse(withMarkdown(quote)).success).toBe(
         true,
       );
@@ -390,6 +471,12 @@ describe("quote locator validation", () => {
     expect(
       revisionDraftSchema.safeParse(withMarkdown("block second")).success,
     ).toBe(false);
+    expect(
+      revisionDraftSchema.safeParse({
+        ...draft("x"),
+        markdown: "Math $x$ is render-dependent.",
+      }).success,
+    ).toBe(true);
   });
 
   test("uses ASCII word boundaries while retaining Chinese fragment matches", () => {
