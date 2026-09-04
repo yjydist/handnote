@@ -140,9 +140,41 @@ function hasReferenceImageSyntax(markdown: string, tree: Root): boolean {
   return found;
 }
 
+function mermaidStatements(value: string): string[] {
+  const statements: string[] = [];
+  let start = 0;
+  let quote: string | undefined;
+  let comment = false;
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (comment) {
+      if (character !== "\n" && character !== "\r") continue;
+      comment = false;
+    } else if (quote) {
+      if (character === "\\") index++;
+      else if (character === quote) quote = undefined;
+      continue;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    } else if (character === "%" && value[index + 1] === "%") {
+      comment = true;
+      index++;
+      continue;
+    } else if (character !== ";" && character !== "\n" && character !== "\r")
+      continue;
+
+    statements.push(value.slice(start, index));
+    if (character === "\r" && value[index + 1] === "\n") index++;
+    start = index + 1;
+  }
+  statements.push(value.slice(start));
+  return statements;
+}
+
 function mermaidHasClickDirective(value: string): boolean {
-  return value.split(/\r?\n/).some((line) => {
-    const match = /^\s*click\s+(\S+)\s+(.+)$/i.exec(line);
+  return mermaidStatements(value).some((statement) => {
+    const match = /^\s*click\s+(\S+)\s+(.+)$/i.exec(statement);
     if (!match) return false;
     const target = match[1] ?? "";
     const action = (match[2] ?? "").trimStart();

@@ -191,6 +191,16 @@ $$
       runDirectory,
       ["link_not_allowed"],
     ).then((issues) => expect(issues[0]?.message).toContain("Mermaid"));
+    for (const directive of [
+      'click a "/local"',
+      "click a call callback()",
+      "click a callback",
+    ])
+      await expectIssues(
+        `\`\`\`mermaid\nflowchart TD\n  a --> b; ${directive}\n\`\`\``,
+        runDirectory,
+        ["link_not_allowed"],
+      );
     await expectIssues(
       '```mermaid\nflowchart TD\n  a["[label](https://example.test)"] --> b\n```',
       runDirectory,
@@ -242,6 +252,15 @@ $$
     await parseNoteMarkdown("```mermaid\nflowchart TD\n  click --> node\n```", {
       runDirectory,
     });
+    for (const source of [
+      'a["literal; click a callback"] --> b',
+      '%% comment; click a "/local"\na --> b',
+      "a --> b; click --> node",
+    ])
+      await parseNoteMarkdown(
+        `\`\`\`mermaid\nflowchart TD\n  ${source}\n\`\`\``,
+        { runDirectory },
+      );
     await expectIssues(
       "```mermaid\nflowchart TD\n  click node callback\n```",
       runDirectory,
