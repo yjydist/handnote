@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { PhrasingContent, Root, RootContent, TableCell } from "mdast";
+import { parseMarkdownTree } from "./markdown-parse.ts";
 
 export const regionSchema = z
   .object({
@@ -72,15 +74,65 @@ export type RevisionAudit = z.infer<typeof revisionAuditSchema>;
 const foldWhitespace = (value: string): string =>
   value.replace(/\s+/g, " ").trim();
 
+function phrasingText(nodes: PhrasingContent[]): string {
+  return nodes
+    .map((node) => {
+      if (
+        node.type === "text" ||
+        node.type === "inlineCode" ||
+        node.type === "inlineMath"
+      )
+        return node.value;
+      if (node.type === "image" || node.type === "imageReference")
+        return node.alt ?? "";
+      if (node.type === "break") return " ";
+      if ("children" in node) return phrasingText(node.children);
+      return "";
+    })
+    .join("");
+}
+
+function visibleBlocks(tree: Root): string[] {
+  const blocks: string[] = [];
+  const collect = (node: RootContent | TableCell): void => {
+    if (
+      node.type === "heading" ||
+      node.type === "paragraph" ||
+      node.type === "tableCell"
+    ) {
+      blocks.push(phrasingText(node.children));
+      return;
+    }
+    if (node.type === "code" || node.type === "math") {
+      blocks.push(node.value);
+      return;
+    }
+    if ("children" in node)
+      for (const child of node.children)
+        collect(child as RootContent | TableCell);
+  };
+  for (const child of tree.children) collect(child);
+  return blocks.map(foldWhitespace).filter(Boolean);
+}
+
+const asciiWord = (value: string | undefined): boolean =>
+  value !== undefined && /^[A-Za-z0-9_]$/.test(value);
+
 function quoteOccurrences(markdown: string, quote: string): number {
-  const folded = foldWhitespace(markdown);
+  const folded = visibleBlocks(parseMarkdownTree(markdown)).join("\0");
   const needle = foldWhitespace(quote);
   if (!needle) return 0;
   let count = 0;
   let index = folded.indexOf(needle);
   while (index >= 0) {
-    count++;
-    index = folded.indexOf(needle, index + needle.length);
+    const before = index > 0 ? folded[index - 1] : undefined;
+    const after = folded[index + needle.length];
+    if (
+      !(asciiWord(needle[0]) && asciiWord(before)) &&
+      !(asciiWord(needle.at(-1)) && asciiWord(after))
+    )
+      count++;
+    index = folded.indexOf(needle, index + 1);
   }
   return count;
 }

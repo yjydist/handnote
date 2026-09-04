@@ -278,6 +278,59 @@ describe("quote locator validation", () => {
     ).toBe(true);
   });
 
+  test("matches visible Markdown text without markup or cross-block phantoms", () => {
+    const markdown = [
+      "# **Visible** heading",
+      "",
+      "first block",
+      "",
+      "second block",
+      "",
+      "| cell | `code` |",
+      "| --- | --- |",
+      "| value | $x$ |",
+      "",
+      "![figure alt](assets/figures/figure-001.png)",
+    ].join("\n");
+    const withMarkdown = (quote: string) => ({
+      ...draft(quote),
+      markdown,
+    });
+    for (const quote of ["Visible heading", "cell", "code", "x", "figure alt"])
+      expect(revisionDraftSchema.safeParse(withMarkdown(quote)).success).toBe(
+        true,
+      );
+    expect(
+      revisionDraftSchema.safeParse(withMarkdown("**Visible**")).success,
+    ).toBe(false);
+    expect(
+      revisionDraftSchema.safeParse(withMarkdown("block second")).success,
+    ).toBe(false);
+  });
+
+  test("uses ASCII word boundaries while retaining Chinese fragment matches", () => {
+    const withMarkdown = (markdown: string, quote: string) => ({
+      ...draft(quote),
+      markdown,
+    });
+    expect(
+      revisionDraftSchema.safeParse(withMarkdown("concatenate", "cat")).success,
+    ).toBe(false);
+    expect(
+      revisionDraftSchema.safeParse(withMarkdown("cat_2 cat", "cat")).success,
+    ).toBe(true);
+    expect(
+      revisionDraftSchema.safeParse(withMarkdown("这是中文片段。", "中文"))
+        .success,
+    ).toBe(true);
+  });
+
+  test("counts overlapping occurrences", () => {
+    const overlapping = draft("哈哈", 2);
+    overlapping.markdown = "哈哈哈";
+    expect(revisionDraftSchema.safeParse(overlapping).success).toBe(true);
+  });
+
   test("rejects quotes that occur too few times", () => {
     expect(revisionDraftSchema.safeParse(draft("重复文本。", 3)).success).toBe(
       false,

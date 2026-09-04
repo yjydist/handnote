@@ -137,6 +137,26 @@ $$
     expect(note.structure.figures).toBe(1);
   });
 
+  test("rejects every reference-style image form", async () => {
+    const runDirectory = await temporary();
+    for (const markdown of [
+      "![defined][figure]\n\n[figure]: assets/figures/figure-001.png",
+      "![undefined][figure]",
+      "![collapsed][]",
+      "![shortcut]",
+    ])
+      await expectIssues(markdown, runDirectory, ["invalid_image_syntax"]);
+    await parseNoteMarkdown("\\![escaped]", { runDirectory });
+  });
+
+  test("rejects footnote references and definitions as links", async () => {
+    const runDirectory = await temporary();
+    await expectIssues("正文[^1]。\n\n[^1]: 注释内容", runDirectory, [
+      "link_not_allowed",
+      "link_not_allowed",
+    ]);
+  });
+
   test("rejects links, click directives, HTML anchors, asset directives, and URLs inside mermaid blocks", async () => {
     const runDirectory = await temporary();
     await expectIssues(
@@ -160,6 +180,22 @@ $$
       ["link_not_allowed"],
     );
     await expectIssues(
+      '```mermaid\nflowchart TD\n  a@{ img: "/local.png" } --> b\n```',
+      runDirectory,
+      ["link_not_allowed"],
+    );
+    for (const attribute of [
+      'IMG: "/local.png"',
+      '"img": "/local.png"',
+      "img",
+      "ImG: '/local.png'",
+    ])
+      await expectIssues(
+        `\`\`\`mermaid\nflowchart TD\n  a@{ ${attribute} } --> b\n\`\`\``,
+        runDirectory,
+        ["link_not_allowed"],
+      );
+    await expectIssues(
       "```mermaid\nflowchart TD\n  a[see https://example.test] --> b\n```",
       runDirectory,
       ["link_not_allowed"],
@@ -168,6 +204,35 @@ $$
       "```mermaid\nflowchart TD\n  a[plain label] --> b\n```",
       { runDirectory },
     );
+    await parseNoteMarkdown(
+      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision" } --> b\n```',
+      { runDirectory },
+    );
+    await parseNoteMarkdown(
+      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision } \\\"ok\\\"" } --> b\n```',
+      { runDirectory },
+    );
+    await parseNoteMarkdown("```mermaid\nflowchart TD\n  click --> node\n```", {
+      runDirectory,
+    });
+  });
+
+  test("requires the lowercase mermaid fence name", async () => {
+    const runDirectory = await temporary();
+    for (const language of ["Mermaid", "MERMAID", "mErMaId"])
+      await expectIssues(
+        `\`\`\`${language}\nflowchart TD\n  a --> b\n\`\`\``,
+        runDirectory,
+        ["invalid_mermaid_fence"],
+      );
+  });
+
+  test("keeps single-dollar math and escaped currency distinct", async () => {
+    const runDirectory = await temporary();
+    const note = await parseNoteMarkdown("Price \\$5; formula $x+1$.", {
+      runDirectory,
+    });
+    expect(note.structure.equations).toBe(1);
   });
 
   test("reports invalid KaTeX as non-blocking equation_fallback warnings", async () => {
@@ -252,14 +317,13 @@ print("hi")
     expect(html).not.toContain("<figcaption");
   });
 
-  test("accepts GFM task lists and footnotes without rejecting generated fragment links", async () => {
+  test("accepts GFM task lists", async () => {
     const runDirectory = await temporary();
-    const markdown = "- [ ] 待办\n- [x] 完成\n\n正文[^1]。\n\n[^1]: 注释内容\n";
+    const markdown = "- [ ] 待办\n- [x] 完成\n";
     const note = await parseNoteMarkdown(markdown, { runDirectory });
-    expect(note.structure.blocks).toBe(5);
+    expect(note.structure.blocks).toBe(3);
     const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain("注释内容");
-    expect(html).not.toContain("https://");
+    expect(html).toContain("待办");
   });
 
   test("blockquote and nested list anchors are assigned per block", async () => {

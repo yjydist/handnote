@@ -5,12 +5,10 @@ import katex from "katex";
 import type { Root } from "mdast";
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
+import { parseMarkdownTree } from "./markdown-parse.ts";
 import type { LayoutWarning } from "./renderer.ts";
 
 export const maxMarkdownLength = 200_000;
@@ -76,20 +74,170 @@ const startLine = (node: LocatedNode): number | undefined =>
   node.position?.start?.line;
 
 const mermaidLinkPatterns: RegExp[] = [
-  /^\s*click\s+\S+/m,
   /\[[^\]]*\]\([^)]*\)/,
   /<a\b/i,
   /href\s*=/i,
-  /@\{/,
   /https?:\/\//i,
 ];
 
+function isEscaped(value: string, index: number): boolean {
+  let slashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor--)
+    slashes++;
+  return slashes % 2 === 1;
+}
+
+function closingBracket(value: string, start: number): number {
+  let depth = 1;
+  for (let index = start + 1; index < value.length; index++) {
+    if (isEscaped(value, index)) continue;
+    if (value[index] === "[") depth++;
+    if (value[index] === "]" && --depth === 0) return index;
+  }
+  return -1;
+}
+
+function hasReferenceImageSyntax(markdown: string, tree: Root): boolean {
+  let found = false;
+  visit(tree, (node) => {
+    if (found || node.type === "code" || node.type === "inlineCode") return;
+    if (node.type === "imageReference") {
+      found = true;
+      return;
+    }
+    if (node.type !== "text") return;
+    const position = node.position;
+    if (
+      position?.start.offset === undefined ||
+      position.end.offset === undefined
+    )
+      return;
+    const source = markdown.slice(position.start.offset, position.end.offset);
+    for (let index = 0; index < source.length - 1; index++) {
+      if (
+        source[index] !== "!" ||
+        source[index + 1] !== "[" ||
+        isEscaped(source, index)
+      )
+        continue;
+      const end = closingBracket(source, index + 1);
+      if (end >= 0 && source[end + 1] !== "(") {
+        found = true;
+        return;
+      }
+    }
+  });
+  return found;
+}
+
+function mermaidHasClickDirective(value: string): boolean {
+  return value.split(/\r?\n/).some((line) => {
+    const match = /^\s*click\s+(\S+)\s+(.+)$/i.exec(line);
+    if (!match) return false;
+    const target = match[1] ?? "";
+    const action = (match[2] ?? "").trimStart();
+    if (/^(?:-->|---|-.->|==>)/.test(target)) return false;
+    return /^(?:["']|href\b|call\b|[A-Za-z_$][\w.$]*(?:\s|\())/i.test(action);
+  });
+}
+
+function quotedKey(
+  value: string,
+  start: number,
+): { key: string; end: number } | undefined {
+  const quote = value[start];
+  if (quote !== '"' && quote !== "'") return undefined;
+  let key = "";
+  for (let index = start + 1; index < value.length; index++) {
+    const character = value[index];
+    if (character === "\\" && index + 1 < value.length) {
+      key += value[index + 1];
+      index++;
+      continue;
+    }
+    if (character === quote) return { key, end: index + 1 };
+    key += character;
+  }
+  return undefined;
+}
+
+function mermaidHasImageAttribute(value: string): boolean {
+  for (let blockStart = value.indexOf("@{"); blockStart >= 0; ) {
+    let depth = 1;
+    let quote: string | undefined;
+    let blockEnd = value.length;
+    for (let index = blockStart + 2; index < value.length; index++) {
+      const character = value[index];
+      if (quote) {
+        if (character === "\\") index++;
+        else if (character === quote) quote = undefined;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+        continue;
+      }
+      if (character === "{") depth++;
+      if (character === "}" && --depth === 0) {
+        blockEnd = index;
+        break;
+      }
+    }
+    const body = value.slice(blockStart + 2, blockEnd);
+    for (let index = 0; index < body.length; ) {
+      while (/[,\s]/.test(body[index] ?? "")) index++;
+      const quoted = quotedKey(body, index);
+      let key = "";
+      if (quoted) {
+        key = quoted.key;
+        index = quoted.end;
+      } else {
+        const match = /^[A-Za-z_][\w-]*/.exec(body.slice(index));
+        if (!match) {
+          index++;
+          continue;
+        }
+        key = match[0];
+        index += key.length;
+      }
+      while (/\s/.test(body[index] ?? "")) index++;
+      if (
+        key.toLowerCase() === "img" &&
+        (body[index] === ":" || body[index] === undefined)
+      )
+        return true;
+      let nestedDepth = 0;
+      let valueQuote: string | undefined;
+      while (index < body.length) {
+        const character = body[index];
+        if (valueQuote) {
+          if (character === "\\") index++;
+          else if (character === valueQuote) valueQuote = undefined;
+        } else if (character === '"' || character === "'")
+          valueQuote = character;
+        else if (character === "{") nestedDepth++;
+        else if (character === "}") nestedDepth--;
+        else if (character === "," && nestedDepth === 0) break;
+        index++;
+      }
+    }
+    blockStart = value.indexOf("@{", blockEnd + 1);
+  }
+  return false;
+}
+
 const mermaidHasLink = (value: string): boolean =>
+  mermaidHasClickDirective(value) ||
+  mermaidHasImageAttribute(value) ||
   mermaidLinkPatterns.some((pattern) => pattern.test(value));
 
 function validateIssues(tree: Root): MarkdownIssue[] {
   const issues: MarkdownIssue[] = [];
   const seen = new Set<string>();
+  const imageDefinitions = new Set<string>();
+  visit(tree, (node) => {
+    if (node.type === "imageReference") imageDefinitions.add(node.identifier);
+  });
   const addUnique = (code: string, message: string, node: LocatedNode) => {
     const line = startLine(node);
     const key = `${code}:${line ?? 0}`;
@@ -104,7 +252,7 @@ function validateIssues(tree: Root): MarkdownIssue[] {
         "Raw HTML is not allowed; express the content in GFM syntax",
         node,
       );
-    if (node.type === "definition")
+    if (node.type === "definition" && !imageDefinitions.has(node.identifier))
       addUnique(
         "link_not_allowed",
         "Link definitions are not allowed; write URLs as inline code instead",
@@ -116,8 +264,20 @@ function validateIssues(tree: Root): MarkdownIssue[] {
         "Links are not allowed; write URLs as inline code instead",
         node,
       );
+    if (node.type === "footnoteReference" || node.type === "footnoteDefinition")
+      addUnique(
+        "link_not_allowed",
+        "Footnotes are not allowed because they render as links",
+        node,
+      );
     if (node.type === "code") {
       const code = node as { lang?: string | null; value?: string };
+      if (code.lang?.toLowerCase() === "mermaid" && code.lang !== "mermaid")
+        addUnique(
+          "invalid_mermaid_fence",
+          "Mermaid fences must use the exact lowercase language name `mermaid`",
+          node,
+        );
       if (code.lang === "mermaid" && mermaidHasLink(code.value ?? ""))
         addUnique(
           "link_not_allowed",
@@ -254,11 +414,13 @@ export async function parseNoteMarkdown(
       code: "frontmatter_unsupported",
       message: "Frontmatter is not supported; start the document with content",
     });
-  const tree = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .use(remarkMath)
-    .parse(markdown);
+  const tree = parseMarkdownTree(markdown);
+  if (hasReferenceImageSyntax(markdown, tree))
+    issues.push({
+      code: "invalid_image_syntax",
+      message:
+        "Reference-style images are not allowed; use inline local image syntax",
+    });
   issues.push(...validateIssues(tree));
   issues.push(...(await missingFigures(tree, options.runDirectory)));
   if (issues.length > 0) throw new MarkdownValidationError(issues);
