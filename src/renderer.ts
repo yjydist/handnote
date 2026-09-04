@@ -43,12 +43,6 @@ const escapeHtml = (value: string) =>
         char
       ] ?? char,
   );
-const escapeMermaid = (value: string) =>
-  value
-    .replace(/["[\]{}()#;]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 async function fontCss(): Promise<string> {
@@ -87,47 +81,6 @@ async function katexCss(): Promise<string> {
   if (/url\(fonts\//.test(css))
     throw new Error("KaTeX CSS contains unresolved font URLs");
   return css;
-}
-
-function diagramText(block: Extract<Block, { type: "diagram" }>): string {
-  const renderIds = new Map(
-    block.nodes.map((item, index) => [item.id, `n${index}`]),
-  );
-  const renderId = (id: string) => renderIds.get(id) ?? id;
-  const node = new Map(
-    block.nodes.map((item) => [
-      item.id,
-      `${renderId(item.id)}["${escapeMermaid(item.label)}"]`,
-    ]),
-  );
-  if (block.kind === "sequence") {
-    const lines = [
-      "sequenceDiagram",
-      ...block.nodes.map(
-        (item) =>
-          `participant ${renderId(item.id)} as ${escapeMermaid(item.label)}`,
-      ),
-    ];
-    for (const edge of block.edges)
-      lines.push(
-        `${renderId(edge.from)}->>${renderId(edge.to)}: ${escapeMermaid(edge.label ?? "")}`,
-      );
-    return lines.join("\n");
-  }
-  const lines = ["flowchart TD"];
-  for (const item of node.values()) lines.push(item);
-  for (const edge of block.edges)
-    lines.push(
-      `${renderId(edge.from)} -->${edge.label ? `|${escapeMermaid(edge.label).replaceAll("|", "#124;")}|` : ""} ${renderId(edge.to)}`,
-    );
-  for (const [index, group] of (block.groups ?? []).entries()) {
-    lines.push(
-      `subgraph g${index}["${escapeMermaid(group.label)}"]`,
-      ...group.nodeIds.map(renderId),
-      "end",
-    );
-  }
-  return lines.join("\n");
 }
 
 async function sourceFigureData(
@@ -185,7 +138,7 @@ async function renderBlock(
       }
     }
     case "diagram":
-      return `<div ${attrs}><pre class="mermaid">${escapeHtml(diagramText(block))}</pre></div>`;
+      return `<div ${attrs}><pre class="mermaid">${escapeHtml(block.mermaid)}</pre></div>`;
     case "source_figure":
       return `<figure ${attrs}><img src="${await sourceFigureData(sourcePath, block)}" alt="${escapeHtml(block.caption ?? "Source figure")}" />${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
   }

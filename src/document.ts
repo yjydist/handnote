@@ -84,93 +84,14 @@ const equationSchema = z
     sources: sourcesSchema.optional(),
   })
   .strict();
-const diagramNodeSchema = z
-  .object({ id: idSchema, label: z.string().min(1) })
-  .strict();
-const diagramEdgeSchema = z
-  .object({ from: idSchema, to: idSchema, label: z.string().optional() })
-  .strict();
-const diagramGroupSchema = z
-  .object({
-    id: idSchema,
-    label: z.string().min(1),
-    nodeIds: z.array(idSchema).min(1),
-  })
-  .strict();
 const diagramSchema = z
   .object({
     id: idSchema,
     type: z.literal("diagram"),
-    kind: z.enum(["flowchart", "mindmap", "sequence"]),
-    nodes: z.array(diagramNodeSchema).min(1).max(100),
-    edges: z.array(diagramEdgeSchema).max(200),
-    groups: z.array(diagramGroupSchema).optional(),
+    mermaid: z.string().min(1).max(8000),
     sources: sourcesSchema.optional(),
   })
-  .strict()
-  .superRefine((diagram, ctx) => {
-    const ids = new Set(diagram.nodes.map((n) => n.id));
-    if (ids.size !== diagram.nodes.length)
-      ctx.addIssue({
-        code: "custom",
-        message: "Diagram node IDs must be unique",
-      });
-    for (const edge of diagram.edges) {
-      if (!ids.has(edge.from) || !ids.has(edge.to))
-        ctx.addIssue({
-          code: "custom",
-          message: "Diagram edge references an unknown node",
-        });
-    }
-    const grouped = new Set<string>();
-    for (const group of diagram.groups ?? []) {
-      for (const nodeId of group.nodeIds) {
-        if (!ids.has(nodeId))
-          ctx.addIssue({
-            code: "custom",
-            message: "Diagram group references an unknown node",
-          });
-        if (grouped.has(nodeId))
-          ctx.addIssue({
-            code: "custom",
-            message: "Diagram groups may not overlap",
-          });
-        grouped.add(nodeId);
-      }
-    }
-    if (diagram.kind === "mindmap") {
-      const indegree = new Map(diagram.nodes.map((n) => [n.id, 0]));
-      for (const edge of diagram.edges)
-        indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1);
-      const roots = [...indegree.values()].filter((v) => v === 0).length;
-      if (
-        roots !== 1 ||
-        diagram.edges.length !== diagram.nodes.length - 1 ||
-        [...indegree.values()].some((v) => v > 1)
-      ) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Mindmap must be a single-root connected tree",
-        });
-      }
-      const root = [...indegree].find(([, degree]) => degree === 0)?.[0];
-      if (root) {
-        const visited = new Set<string>();
-        const visit = (id: string) => {
-          if (visited.has(id)) return;
-          visited.add(id);
-          for (const edge of diagram.edges)
-            if (edge.from === id) visit(edge.to);
-        };
-        visit(root);
-        if (visited.size !== diagram.nodes.length)
-          ctx.addIssue({
-            code: "custom",
-            message: "Mindmap must be connected from its root",
-          });
-      }
-    }
-  });
+  .strict();
 const sourceFigureSchema = z
   .object({
     id: idSchema,
@@ -259,11 +180,6 @@ export const noteDocumentSchema = z
       add(section.id, "section");
       for (const block of section.blocks) {
         add(block.id, "block");
-        if (block.type === "diagram") {
-          for (const node of block.nodes) add(node.id, "diagram node");
-          for (const group of block.groups ?? [])
-            add(group.id, "diagram group");
-        }
       }
       for (const child of section.sections ?? []) visit(child);
     };

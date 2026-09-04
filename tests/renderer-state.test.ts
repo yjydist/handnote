@@ -46,12 +46,7 @@ describe("renderer", () => {
       {
         id: "diagram",
         type: "diagram",
-        kind: "flowchart",
-        nodes: [
-          { id: "end", label: "开始" },
-          { id: "b", label: "结束" },
-        ],
-        edges: [{ from: "end", to: "b", label: "|x|" }],
+        mermaid: 'flowchart TD\n  start["开始"] --> fin["结束"]',
       },
       {
         id: "figure",
@@ -72,8 +67,10 @@ describe("renderer", () => {
     expect(html).toContain("font-family:KaTeX_Main");
     expect(html).not.toContain("url(fonts/");
     expect(html).toContain("data:image/png;base64,");
-    expect(html).toContain("n0[&quot;开始&quot;]");
-    expect(html).toContain("n0 --&gt;|#124;x#124;| n1");
+    expect(html).toContain('<pre class="mermaid">');
+    expect(html).toContain(
+      "start[&quot;开始&quot;] --&gt; fin[&quot;结束&quot;]",
+    );
     expect(html).not.toMatch(/<(?:script|img)[^>]+src=["']https?:/i);
     expect(html).not.toMatch(/<link[^>]+href=["']https?:/i);
     expect(
@@ -205,9 +202,7 @@ describe("renderer", () => {
     document.sections[0]?.blocks.push({
       id: "broken-diagram",
       type: "diagram",
-      kind: "flowchart",
-      nodes: [{ id: "node", label: "`" }],
-      edges: [],
+      mermaid: "flowchart TD\n  A -->> B",
     });
     const result = await renderDocument(document, source, directory, 1, 700);
     expect(result.warnings).toEqual(

@@ -21,13 +21,7 @@ describe("NoteDocument", () => {
       {
         id: "diagram",
         type: "diagram",
-        kind: "flowchart",
-        nodes: [
-          { id: "n1", label: "one" },
-          { id: "n2", label: "two" },
-        ],
-        edges: [{ from: "n1", to: "n2" }],
-        groups: [{ id: "g1", label: "group", nodeIds: ["n1"] }],
+        mermaid: 'flowchart TD\n  n1["one"] --> n2["two"]',
       },
       { id: "figure", type: "source_figure", region: fullRegion },
     );
@@ -99,7 +93,7 @@ describe("NoteDocument", () => {
     expect(revisionDraftSchema.safeParse(alternativesOnly).success).toBe(true);
   });
 
-  test("rejects duplicate IDs, bad table width, out-of-bounds regions, and invalid diagrams", () => {
+  test("rejects duplicate IDs, bad table width, out-of-bounds regions, and empty mermaid", () => {
     const duplicate = simpleDocument();
     duplicate.sections.push({
       id: "section-1",
@@ -125,18 +119,13 @@ describe("NoteDocument", () => {
     });
     expect(noteDocumentSchema.safeParse(badRegion).success).toBe(false);
 
-    const badMindmap = simpleDocument();
-    badMindmap.sections[0]?.blocks.push({
+    const emptyMermaid = simpleDocument();
+    emptyMermaid.sections[0]?.blocks.push({
       id: "map",
       type: "diagram",
-      kind: "mindmap",
-      nodes: [
-        { id: "n1", label: "one" },
-        { id: "n2", label: "two" },
-      ],
-      edges: [],
+      mermaid: "",
     });
-    expect(noteDocumentSchema.safeParse(badMindmap).success).toBe(false);
+    expect(noteDocumentSchema.safeParse(emptyMermaid).success).toBe(false);
   });
 });
 
