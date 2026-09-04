@@ -11,10 +11,14 @@ handnote run <image> --config <yaml> --output <dir> [--json]
 | 路径 | 内容 |
 |:----:|:----:|
 | `original{ext}` | 复制后的源图 |
-| `note.json` | 最终结构化 `NoteDocument` |
+| `note.md` | 最终 GFM markdown (被 finalize 的 revision 原字节) |
 | `note.png` | 最终渲染图 |
+| `revisions/revision-NNN.md` | 每个成功 revision 的 markdown 原字节, 不参与 cleanup, 保证可从磁盘独立重建 |
+| `assets/figures/figure-NNN.png` | `capture_figure` 物化的源图裁片, 被 markdown 引用, 不参与 cleanup |
 | `run.json` | 运行 manifest (`RunManifest`) |
 | `session/events.jsonl` | 脱敏 session 事件日志 |
-| `intermediate/` | 中间产物 (inspections / revisions), 可由 `saveIntermediateImages` 控制清理 |
+| `intermediate/` | 中间产物 (inspections / revisions 渲染), 可由 `saveIntermediateImages` 控制清理 |
+
+`manifest.final` 为 `{ markdown: "note.md", image: "note.png", markdownSha256, imageSha256, revision }`. `finalize_note` 在门控通过后重算磁盘 revision 的 sha256 并要求等于 `state.revision.markdownSha256`, 实现 finalize 绑定被 review 的 revision/hash.
 
 退出码 (`src/run.ts:338`): `complete` → 0, `partial` → 2, `failed` → 1.

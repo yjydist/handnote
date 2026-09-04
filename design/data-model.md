@@ -1,30 +1,25 @@
-# 核心数据模型 (document.ts)
+# 核心数据模型 (document.ts + markdown.ts)
 
 ## Region 归一化坐标
 
 `regionSchema` (`src/document.ts:3`) 定义归一化区域: `x` / `y` 取值 `[0,1]`, `width` / `height` 为正且不超过 1, 并通过 `refine` 强制 `x + width <= 1` 且 `y + height <= 1`, 越界即拒绝. 坐标相对 EXIF 旋转后的显示源图. 在 `inspect_source` 输入中, 越界的宽高会被裁剪到图像边界 (`src/image.ts:53`).
 
-## Block 8 种 discriminated union
+## RevisionDraft (markdown 契约)
 
-`blockSchema` (`src/document.ts:183`) 按 `type` 区分为 8 种:
+笔记的持久化格式是 GFM Markdown 字符串 (详见 [markdown.md](markdown.md)). `revisionDraftSchema` (`src/document.ts:83`) 为:
 
-| type | 字段要点 | 关键约束 |
-|:----:|:----:|:----:|
-| `paragraph` | `text` | 文本非空 |
-| `bullet_list` | `items` (递归 `text` + `children`) | 至少 1 项 |
-| `numbered_steps` | `steps` (字符串数组) | 至少 1 步 |
-| `callout` | `tone` (`info` / `warning` / `tip`) + `text` | tone 枚举 |
-| `table` | `headers` + `rows` | 每行长度必须等于表头数 (`src/document.ts:74`) |
-| `equation` | `latex` + 可选 `label` | latex 非空 |
-| `diagram` | `kind` (`flowchart` / `mindmap` / `sequence`) + `nodes` + `edges` + 可选 `groups` | 节点 id 唯一; 边引用必须存在; group 不重叠; mindmap 必须单根连通树 (`src/document.ts:111`) |
-| `source_figure` | `region` + 可选 `caption` | 直接引用源图区域, 无 `sources` |
+```text
+{ markdown: string (非空), audit: RevisionAudit }
+```
 
-除 `source_figure` 外, 各块均可携带 `sources` (归一化区域数组, 至少 1 项) 记录出处.
-
-## Section 与 NoteDocument
-
-`Section` (`src/document.ts:195`) 递归嵌套: `id` + 可选 `title` + `blocks` + 可选 `sections`. `noteDocumentSchema` (`src/document.ts:242`) 要求 `title` 可选, `sections` 非空, 并通过 `superRefine` 保证全文档内 section / block / diagram node / diagram group 的 ID 全局唯一.
+工具外层仍是 JSON 协议, 但文档主体只传 Markdown 字符串; 修订是全文替换, 没有 JSON patch.
 
 ## 审计契约
 
-`RevisionAudit` (`src/document.ts:275`) 包含 `corrections` 与 `uncertainties` 两个数组 (默认空), 审计条目 ID 全局唯一. 每个条目通过 `target` (`document_title` / `section_title` / `block`) 指向文档中真实存在的对象; `correction` 的 `confidence` 门槛为 0.95 (`src/document.ts:227`), `uncertainty` 的 `confidence` 在 `[0,1]` 且需至少 2 个候选 (`src/document.ts:238`). `RevisionDraft` (`src/document.ts:295`) 为 `{ document, audit }`, 其 `superRefine` 校验每个审计 `target` 必须真实存在. 审计数据仅存在于 session 与 `RevisionDraft`, 渲染器只消费 `document`, 因此审计不会进入任何渲染产物.
+`RevisionAudit` (`src/document.ts:62`) 包含 `corrections` 与 `uncertainties` 两个数组 (默认空), 审计条目 ID 全局唯一. 审计定位用 quote locator: `target = { quote, occurrence? }` (`auditTargetSchema`, `src/document.ts:18`), `quote` (1..500 字符) 必须在折叠空白 (双侧 `\s+` → 单空格并 trim) 后于 `markdown` 中出现至少 `occurrence ?? 1` 次, 由 `revisionDraftSchema` 的 `superRefine` 强制, 错误消息为 "Audit {id} quote not found (occurrence N)". 标题定位天然可用 (quote 标题行文本). `correction` 的 `confidence` 门槛为 0.95 (`src/document.ts:37`), `uncertainty` 的 `confidence` 在 `[0,1]` 且需至少 2 个候选 (`src/document.ts:46`).
+
+审计数据仅存在于 session 与 `RevisionDraft`, 渲染管线只消费 markdown, 因此审计不会进入任何渲染产物或 `note.md`.
+
+## 运行时 IR
+
+`parseNoteMarkdown` (`src/markdown.ts:220`) 在单次工具调用内产出 `NoteMarkdown { markdown, tree (带 data-hn-id 锚点的 mdast), structure, mathWarnings }`; tree 是可丢弃 IR, 不持久化. `structure` 由 mdast 派生: `headings` / `blocks` / `tables` / `equations` / `diagrams` / `figures`.

@@ -11,7 +11,7 @@ flowchart TB
         redact["redact.ts"]
     end
     subgraph data["数据层"]
-        patch["patch.ts"]
+        markdown["markdown.ts"]
         image["image.ts"]
     end
     subgraph render["渲染层"]
@@ -34,15 +34,17 @@ flowchart TB
         cli["cli.ts"]
     end
 
-    patch --> document
+    markdown --> document
+    markdown --> renderer
+    markdown --> utils
+    markdown --> errors
     image --> document
     image --> errors
-    renderer --> document
-    renderer --> image
+    renderer --> markdown
     renderer --> utils
     renderer --> errors
     session --> redact
-    tools --> patch
+    tools --> markdown
     tools --> image
     tools --> renderer
     tools --> document
@@ -115,10 +117,11 @@ flowchart LR
     execute --> agent["runAgent"]
     agent --> generate["Agent.generate 多步循环"]
     generate --> inspect["inspect_source"]
-    generate --> write["write_document"]
-    generate --> patch["patch_document"]
+    generate --> capture["capture_figure"]
+    generate --> read["read_note"]
+    generate --> write["write_note / revise_note"]
     generate --> review["review_render"]
     generate --> finalize["finalize_note"]
-    finalize --> commit["提交 note.json / note.png"]
+    finalize --> commit["提交 note.md / note.png"]
     commit --> manifest["写入 run.json"]
 ```
