@@ -137,6 +137,29 @@ $$
     expect(note.structure.figures).toBe(1);
   });
 
+  test("rejects click directives, markdown links, and HTML anchors inside mermaid blocks", async () => {
+    const runDirectory = await temporary();
+    await expectIssues(
+      '```mermaid\nflowchart TD\n  a --> b\n  click a "https://example.test"\n```',
+      runDirectory,
+      ["link_not_allowed"],
+    ).then((issues) => expect(issues[0]?.message).toContain("Mermaid"));
+    await expectIssues(
+      '```mermaid\nflowchart TD\n  a["[label](https://example.test)"] --> b\n```',
+      runDirectory,
+      ["link_not_allowed"],
+    );
+    await expectIssues(
+      "```mermaid\nflowchart TD\n  a[\"<a href='https://example.test'>x</a>\"] --> b\n```",
+      runDirectory,
+      ["link_not_allowed"],
+    );
+    await parseNoteMarkdown(
+      "```mermaid\nflowchart TD\n  a[plain label] --> b\n```",
+      { runDirectory },
+    );
+  });
+
   test("reports invalid KaTeX as non-blocking equation_fallback warnings", async () => {
     const runDirectory = await temporary();
     const note = await parseNoteMarkdown(

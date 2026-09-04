@@ -75,6 +75,16 @@ interface LocatedNode {
 const startLine = (node: LocatedNode): number | undefined =>
   node.position?.start?.line;
 
+const mermaidLinkPatterns: RegExp[] = [
+  /^\s*click\s+\S+/m,
+  /\[[^\]]*\]\([^)]*\)/,
+  /<a\b/i,
+  /href\s*=/i,
+];
+
+const mermaidHasLink = (value: string): boolean =>
+  mermaidLinkPatterns.some((pattern) => pattern.test(value));
+
 function validateIssues(tree: Root): MarkdownIssue[] {
   const issues: MarkdownIssue[] = [];
   const seen = new Set<string>();
@@ -104,6 +114,15 @@ function validateIssues(tree: Root): MarkdownIssue[] {
         "Links are not allowed; write URLs as inline code instead",
         node,
       );
+    if (node.type === "code") {
+      const code = node as { lang?: string | null; value?: string };
+      if (code.lang === "mermaid" && mermaidHasLink(code.value ?? ""))
+        addUnique(
+          "link_not_allowed",
+          "Links are not allowed in Mermaid diagrams (click directives, markdown links, HTML anchors); write URLs as inline code instead",
+          node,
+        );
+    }
     if (node.type === "image") {
       const url = (node as { url?: string }).url ?? "";
       if (!figurePathPattern.test(url))
