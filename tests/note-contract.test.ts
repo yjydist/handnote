@@ -190,6 +190,28 @@ describe("note tool sequencing", () => {
     });
     expect(state.revision).toBeUndefined();
   });
+
+  test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
+    const directory = await temporary();
+    const { tools } = await setup(directory);
+    const schema = tools.write_note.inputSchema;
+    if (!schema) throw new Error("missing write_note inputSchema");
+    expect(
+      schema.safeParse({
+        markdown: simpleMarkdown(),
+        extra: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        markdown: simpleMarkdown(),
+        audit: { corrections: [], uncertainties: [], extra: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ markdown: simpleMarkdown(), audit: {} }).success,
+    ).toBe(true);
+  });
 });
 
 describe("finalize hash binding", () => {

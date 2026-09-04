@@ -30,15 +30,18 @@ export const noteRevisionOutputSchema = z.union([
   }),
 ]);
 
-export const noteDraftInputSchema = z.object({
-  markdown: z.string().min(1),
-  audit: z
-    .object({
-      corrections: z.array(z.unknown()).default([]),
-      uncertainties: z.array(z.unknown()).default([]),
-    })
-    .default({ corrections: [], uncertainties: [] }),
-});
+export const noteDraftInputSchema = z
+  .object({
+    markdown: z.string().min(1),
+    audit: z
+      .object({
+        corrections: z.array(z.unknown()).default([]),
+        uncertainties: z.array(z.unknown()).default([]),
+      })
+      .strict()
+      .default({ corrections: [], uncertainties: [] }),
+  })
+  .strict();
 
 export interface NoteToolSuccess {
   ok: true;
