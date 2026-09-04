@@ -332,6 +332,7 @@ function anchorTree(tree: Root): Map<object, string> {
     if (blockNodeTypes.has(node.type)) {
       currentBlockId = `hn-${String(++counter).padStart(4, "0")}`;
       currentBlockNode = node;
+      anchors.set(node, currentBlockId);
       node.data = {
         ...(node.data ?? {}),
         hProperties: { dataHnId: currentBlockId },
@@ -482,6 +483,36 @@ function swapMermaidBlocks(tree: HastRoot): void {
   });
 }
 
+function wrapDisplayMathBlocks(tree: HastRoot): void {
+  visit(tree, (node, index, parent) => {
+    if (
+      !parent ||
+      typeof index !== "number" ||
+      node.type !== "element" ||
+      node.tagName !== "pre" ||
+      node.children.length !== 1
+    )
+      return;
+    const code = node.children[0];
+    if (
+      !code ||
+      code.type !== "element" ||
+      code.tagName !== "code" ||
+      !((code.properties.className ?? []) as unknown[]).includes("math-display")
+    )
+      return;
+    const id = dataHnId(node.properties) ?? dataHnId(code.properties);
+    const properties = { ...node.properties };
+    delete properties.dataHnId;
+    parent.children[index] = {
+      type: "element",
+      tagName: "div",
+      properties: { ...(id ? { dataHnId: id } : {}) },
+      children: [{ ...node, properties }],
+    };
+  });
+}
+
 async function inlineFigures(
   tree: HastRoot,
   runDirectory: string,
@@ -541,6 +572,7 @@ function wrapStandaloneFigures(tree: HastRoot): void {
 function inlineNoteAssets(runDirectory: string) {
   const transform = async (tree: HastRoot) => {
     swapMermaidBlocks(tree);
+    wrapDisplayMathBlocks(tree);
     await inlineFigures(tree, runDirectory);
     wrapStandaloneFigures(tree);
   };

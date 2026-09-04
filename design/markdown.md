@@ -24,13 +24,13 @@ GFM Markdown 是笔记的 canonical 持久化格式 (模型的心智模型与磁
 
 ## 锚点 (`data-hn-id`)
 
-校验通过后, 校验 walk 给每个块级 mdast 节点 (paragraph / heading / code / blockquote / list / table / math / thematicBreak) 按文档序赋 `dataHnId = "hn-NNNN"`, 经 remark-rehype 的 `data.hProperties` 传递到 hast 后序列化为 `data-hn-id` 属性. code fence 的锚点落在 `<code>` 而非 `<pre>` 上, mermaid 替换时搬运到 `pre`. 渲染器布局检查与 mermaid 错误定位查询 `[data-hn-id]` (替代旧 `[data-block-id]`).
+校验通过后, 校验 walk 给每个块级 mdast 节点 (paragraph / heading / code / blockquote / list / table / math / thematicBreak) 按文档序赋 `dataHnId = "hn-NNNN"`, 同时在 anchor map 登记块节点自身. 属性经 remark-rehype 的 `data.hProperties` 传递到 hast 后序列化为 `data-hn-id`. code fence 的锚点落在 `<code>` 而非 `<pre>` 上, mermaid 替换时搬运到 `pre`; display math 在 KaTeX 转换前增加保留锚点的块级包装. 渲染器布局检查与 mermaid 错误定位查询 `[data-hn-id]` (替代旧 `[data-block-id]`).
 
 ## 渲染管线 (`noteMarkdownToHtml`, `src/markdown.ts:365`)
 
 remark-parse → remark-gfm / remark-math (在 parse 阶段) → 校验 walk → 锚点 walk → remark-rehype → inline hast 变换插件 → rehype-katex → rehype-stringify.
 
-inline 变换插件按序执行三步:
+inline 变换插件在 KaTeX 前执行 Mermaid 替换、display math 锚点包装和图片处理:
 
 1. mermaid swap: `<pre><code class="language-mermaid">` 替换为 `<pre class="mermaid" data-hn-id>text</pre>` (事后变换而非自定义 code handler, 避免重实现其他语言的默认渲染);
 2. 图片内联: `<img src="assets/figures/*.png">` 从已校验的磁盘 asset 读出并改写为 `data:image/png;base64` (HTML 落在 `intermediate/revisions/` 下, 相对路径无法解析, 且产物必须自包含);

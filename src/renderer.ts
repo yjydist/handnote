@@ -94,7 +94,14 @@ async function buildHtml(
   );
   const title = titleMatch ? "page has-title" : "page";
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=${width}"><style>${font}${math}
-*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}.page>*{margin:18px 0}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre{white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}</style></head><body><main class="${title}">${body}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
+*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}:where(.page)>*{margin:18px 0}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre:not(.mermaid){white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}</style></head><body><main class="${title}">${body}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
+}
+
+export function isAllowedRenderRequest(
+  requestUrl: string,
+  documentUrl: string,
+): boolean {
+  return requestUrl === documentUrl || requestUrl.startsWith("data:");
 }
 
 async function screenshotTall(
@@ -107,14 +114,14 @@ async function screenshotTall(
     viewport: { width, height: 900 },
     deviceScaleFactor: 1,
   });
+  const documentUrl = pathToFileURL(htmlPath).href;
   await context.route("**/*", async (route) => {
     const url = route.request().url();
-    if (url.startsWith("file://") || url.startsWith("data:"))
-      return route.continue();
+    if (isAllowedRenderRequest(url, documentUrl)) return route.continue();
     return route.abort();
   });
   const page = await context.newPage();
-  await page.goto(pathToFileURL(htmlPath).href, { waitUntil: "load" });
+  await page.goto(documentUrl, { waitUntil: "load" });
   await page.waitForFunction(
     () =>
       (globalThis as typeof globalThis & { __handnoteReady?: boolean })
@@ -190,7 +197,7 @@ async function screenshotTall(
       if (horizontalOverflow > 1)
         warnings.push({
           code: "element_horizontal_overflow",
-          message: `Block ${id} content is ${horizontalOverflow}px wider than its ${element.clientWidth}px container; change the visible block content or layout, not its source regions`,
+          message: `Block ${id} content is ${horizontalOverflow}px wider than its ${element.clientWidth}px container`,
           blocking: true,
           axis: "horizontal",
           overflowPx: horizontalOverflow,

@@ -3,15 +3,17 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
 import sharp from "sharp";
 import { unified } from "unified";
+import { chromium } from "playwright";
 import { emptyRevisionAudit } from "../src/document.ts";
 import type { NoteMarkdown } from "../src/markdown.ts";
 import { parseNoteMarkdown } from "../src/markdown.ts";
-import { renderDocument } from "../src/renderer.ts";
+import { isAllowedRenderRequest, renderDocument } from "../src/renderer.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
@@ -118,6 +120,51 @@ ${figureMarkdown}
     expect(html).toContain("flowchart TD");
     expect(html).not.toMatch(/<(?:script|img)[^>]+src=["']https?:/i);
     expect(html).not.toMatch(/<link[^>]+href=["']https?:/i);
+    expect(html).toContain(
+      '<div data-hn-id="hn-0005"><span class="katex-display">',
+    );
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 900, height: 900 },
+      });
+      await page.goto(pathToFileURL(result.htmlPath).href);
+      await page.waitForFunction(
+        () =>
+          (globalThis as typeof globalThis & { __handnoteReady?: boolean })
+            .__handnoteReady === true,
+      );
+      const styles = await page.evaluate(() => {
+        const values = (selector: string) => {
+          const element = document.querySelector(selector);
+          if (!element) throw new Error(`Missing ${selector}`);
+          const style = getComputedStyle(element);
+          return {
+            marginTop: style.marginTop,
+            marginBottom: style.marginBottom,
+            paddingTop: style.paddingTop,
+            backgroundColor: style.backgroundColor,
+          };
+        };
+        return {
+          h1: values("h1"),
+          h2: values("h2"),
+          mermaid: values("pre.mermaid"),
+        };
+      });
+      expect(styles.h1).toMatchObject({
+        marginTop: "0px",
+        marginBottom: "20px",
+      });
+      expect(styles.h2.marginTop).toBe("42px");
+      expect(styles.mermaid).toMatchObject({
+        paddingTop: "0px",
+        backgroundColor: "rgba(0, 0, 0, 0)",
+      });
+    } finally {
+      await browser.close();
+    }
     expect(
       result.warnings.some(
         (warning) => warning.code === "diagram_render_error",
@@ -249,14 +296,18 @@ ${figureMarkdown}
       requests++;
     }).listen(0);
     const port = (server.address() as { port: number }).port;
-    // Bypass parseNoteMarkdown validation on purpose: the renderer request
-    // allowlist must also hold when upstream validation is ever bypassed.
-    const markdown = `# 测试笔记\n\n<img src="http://127.0.0.1:${port}/x.png" alt="probe">\n`;
+    const probeUrl = `http://127.0.0.1:${port}/probe`;
+    const markdown = "# 测试笔记\n";
     const tree = unified()
       .use(remarkParse)
       .use(remarkGfm)
       .use(remarkMath)
       .parse(markdown) as NoteMarkdown["tree"];
+    tree.children.push({
+      type: "resource-probe",
+      data: { hName: "iframe", hProperties: { src: probeUrl } },
+      children: [],
+    } as never);
     const note: NoteMarkdown = {
       markdown,
       tree,
@@ -274,6 +325,7 @@ ${figureMarkdown}
       const result = await renderDocument(note, directory, 1, 700);
       expect(result.width).toBe(700);
       expect(await Bun.file(result.imagePath).exists()).toBe(true);
+      expect(await Bun.file(result.htmlPath).text()).toContain(probeUrl);
       expect(requests).toBe(0);
     } finally {
       await new Promise<void>((resolve, reject) =>
@@ -281,6 +333,21 @@ ${figureMarkdown}
       );
     }
   }, 30_000);
+
+  test("allows only the exact render document file URL and data URLs", () => {
+    const documentUrl = "file:///tmp/run/revision-001.html";
+    expect(isAllowedRenderRequest(documentUrl, documentUrl)).toBe(true);
+    expect(
+      isAllowedRenderRequest("data:image/png;base64,AA==", documentUrl),
+    ).toBe(true);
+    expect(
+      isAllowedRenderRequest("file:///tmp/run/other.png", documentUrl),
+    ).toBe(false);
+    expect(isAllowedRenderRequest("http://127.0.0.1/probe", documentUrl)).toBe(
+      false,
+    );
+    expect(isAllowedRenderRequest("blob:null/id", documentUrl)).toBe(false);
+  });
 });
 
 describe("finalization state machine", () => {

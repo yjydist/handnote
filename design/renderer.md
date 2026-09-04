@@ -6,4 +6,4 @@
 - 布局体检 (`src/renderer.ts:11`): 截图时在浏览器内检测横向溢出, 块裁剪, 零尺寸, diagram 渲染失败等, 产出 `LayoutWarning`, 其中 `blocking` 标记是否阻塞 finalize. 布局检查与 mermaid `.error-icon` 定位查询 `[data-hn-id]` 锚点 (由 markdown 管线赋值).
 - 数学警告 (`equation_fallback`, 非 blocking) 在校验期由 markdown 管线预检产生, 随 `mathWarnings` 并入渲染 warnings.
 - 超高页 (`src/renderer.ts:195`): 高度不超过 12000px 直接整页截图, 否则分段截图后用 sharp 拼合.
-- Chromium 请求白名单: 截图 context 通过 `route` 仅放行 `file:` 与 `data:` 请求, abort 其余一切外部请求, 兜底保证渲染期无网络出口 (上游 markdown 校验已拒绝外部资源).
+- Chromium 请求白名单: 截图 context 通过 `route` 仅放行当前生成 HTML 的精确 `file:` URL 与 `data:` URL, abort 其他本地文件、HTTP、blob 等一切资源请求, 兜底保证渲染期无额外文件读取或网络出口 (上游 markdown 校验已拒绝外部资源).

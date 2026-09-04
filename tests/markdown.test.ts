@@ -249,7 +249,7 @@ $$
     ).toBe(true);
     expect(note.mathWarnings.every((warning) => !warning.blocking)).toBe(true);
     expect(note.mathWarnings[0]?.elementId).toBe("hn-0001");
-    expect(note.mathWarnings[1]?.elementId).toBe("document");
+    expect(note.mathWarnings[1]?.elementId).toBe("hn-0002");
   });
 });
 
@@ -289,6 +289,15 @@ print("hi")
     expect(html).not.toContain("language-mermaid");
     expect(html).toContain("<code");
     expect(html).toContain('class="language-python"');
+  });
+
+  test("preserves the display-math anchor through KaTeX conversion", async () => {
+    const runDirectory = await temporary();
+    const note = await parseNoteMarkdown("$$\nx^2\n$$", { runDirectory });
+    const html = await noteMarkdownToHtml(note, { runDirectory });
+    expect(html).toMatch(
+      /^<div data-hn-id="hn-0001"><span class="katex-display">/,
+    );
   });
 
   test("inlines local figures as data URIs and wraps standalone images in figure", async () => {
