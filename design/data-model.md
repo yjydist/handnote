@@ -16,14 +16,14 @@
 | `callout` | `tone` (`info` / `warning` / `tip`) + `text` | tone 枚举 |
 | `table` | `headers` + `rows` | 每行长度必须等于表头数 (`src/document.ts:74`) |
 | `equation` | `latex` + 可选 `label` | latex 非空 |
-| `diagram` | `kind` (`flowchart` / `mindmap` / `sequence`) + `nodes` + `edges` + 可选 `groups` | 节点 id 唯一; 边引用必须存在; group 不重叠; mindmap 必须单根连通树 (`src/document.ts:111`) |
+| `diagram` | `mermaid` (mermaid 源码字符串) | 非空且不超过 8000 字符; 首行声明图类型 (`flowchart TD` / `mindmap` / `sequenceDiagram` 等); 语义校验交给浏览器端 mermaid 渲染 (`src/document.ts:87`) |
 | `source_figure` | `region` + 可选 `caption` | 直接引用源图区域, 无 `sources` |
 
 除 `source_figure` 外, 各块均可携带 `sources` (归一化区域数组, 至少 1 项) 记录出处.
 
 ## Section 与 NoteDocument
 
-`Section` (`src/document.ts:195`) 递归嵌套: `id` + 可选 `title` + `blocks` + 可选 `sections`. `noteDocumentSchema` (`src/document.ts:242`) 要求 `title` 可选, `sections` 非空, 并通过 `superRefine` 保证全文档内 section / block / diagram node / diagram group 的 ID 全局唯一.
+`Section` (`src/document.ts:195`) 递归嵌套: `id` + 可选 `title` + `blocks` + 可选 `sections`. `noteDocumentSchema` (`src/document.ts:242`) 要求 `title` 可选, `sections` 非空, 并通过 `superRefine` 保证全文档内 section / block 的 ID 全局唯一.
 
 ## 审计契约
 
