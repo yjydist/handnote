@@ -80,7 +80,7 @@ const mermaidLinkPatterns: RegExp[] = [
 ];
 
 const mermaidRawHtmlPatterns: RegExp[] = [
-  /<\/?[A-Za-z][A-Za-z0-9:-]*(?:(?:\s+|\/)(?:[^"'<>]|"[^"]*"|'[^']*')*)?\s*\/?>/,
+  /<\/?[A-Za-z][^\t\n\f\r />]*(?:[^"'>]|"[^"]*"|'[^']*')*>/,
   /<!--[\s\S]*?-->/,
   /<!\[CDATA\[[\s\S]*?\]\]>/i,
   /<![A-Za-z][^<>]*>/,
