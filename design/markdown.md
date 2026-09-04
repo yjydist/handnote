@@ -14,7 +14,7 @@ GFM Markdown 是笔记的 canonical 持久化格式 (模型的心智模型与磁
 | `empty_document` | 空白文档 |
 | `frontmatter_unsupported` | 首行 `---` (文本预检, 不用 remark-frontmatter) |
 | `raw_html` | 任何 mdast `html` 节点 (含段内 inline HTML) |
-| `link_not_allowed` | 任何 `link` (含 GFM autolink literal, 裸 URL 即 link), `definition` 节点; 含 mermaid code block 内的 click 指令 / markdown 链接 / HTML 锚点 (静态文本校验) |
+| `link_not_allowed` | 任何 `link` (含 GFM autolink literal, 裸 URL 即 link), `definition` 节点; 含 mermaid code block 内的 click 指令 / markdown 链接 / HTML 锚点 / 资产指令 `@{}` / URL scheme `https?://` (静态文本校验) |
 | `invalid_image_path` | `image.url` 不匹配 `^assets/figures/[A-Za-z0-9][A-Za-z0-9._-]*\.png$` |
 | `unknown_image` | 引用的 asset 文件在 run 目录下不存在 |
 

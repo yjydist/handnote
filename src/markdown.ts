@@ -80,6 +80,8 @@ const mermaidLinkPatterns: RegExp[] = [
   /\[[^\]]*\]\([^)]*\)/,
   /<a\b/i,
   /href\s*=/i,
+  /@\{/,
+  /https?:\/\//i,
 ];
 
 const mermaidHasLink = (value: string): boolean =>
@@ -119,7 +121,7 @@ function validateIssues(tree: Root): MarkdownIssue[] {
       if (code.lang === "mermaid" && mermaidHasLink(code.value ?? ""))
         addUnique(
           "link_not_allowed",
-          "Links are not allowed in Mermaid diagrams (click directives, markdown links, HTML anchors); write URLs as inline code instead",
+          "Links are not allowed in Mermaid diagrams (click directives, markdown links, HTML anchors, asset directives, or URLs); write URLs as inline code instead",
           node,
         );
     }

@@ -137,7 +137,7 @@ $$
     expect(note.structure.figures).toBe(1);
   });
 
-  test("rejects click directives, markdown links, and HTML anchors inside mermaid blocks", async () => {
+  test("rejects links, click directives, HTML anchors, asset directives, and URLs inside mermaid blocks", async () => {
     const runDirectory = await temporary();
     await expectIssues(
       '```mermaid\nflowchart TD\n  a --> b\n  click a "https://example.test"\n```',
@@ -151,6 +151,16 @@ $$
     );
     await expectIssues(
       "```mermaid\nflowchart TD\n  a[\"<a href='https://example.test'>x</a>\"] --> b\n```",
+      runDirectory,
+      ["link_not_allowed"],
+    );
+    await expectIssues(
+      '```mermaid\nflowchart TD\n  a@{ img: "https://example.test/x.png" } --> b\n```',
+      runDirectory,
+      ["link_not_allowed"],
+    );
+    await expectIssues(
+      "```mermaid\nflowchart TD\n  a[see https://example.test] --> b\n```",
       runDirectory,
       ["link_not_allowed"],
     );
