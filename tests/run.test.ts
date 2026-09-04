@@ -62,6 +62,34 @@ function completion(name: string, args: unknown, sequence: number): Response {
   });
 }
 
+function completionMany(
+  calls: Array<[name: string, args: unknown]>,
+  sequence: number,
+): Response {
+  return Response.json({
+    id: `offline-${sequence}`,
+    object: "chat.completion",
+    created: 1,
+    model: "offline",
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: calls.map(([name, args], index) => ({
+            id: `call-${sequence}-${index}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) },
+          })),
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  });
+}
+
 function textCompletion(sequence: number): Response {
   return Response.json({
     id: `offline-${sequence}`,
@@ -311,6 +339,62 @@ describe("run controller", () => {
           "session",
         ]),
       );
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
+
+  test("keeps a successful same-step finalize complete despite a concurrent fatal tool error", async () => {
+    const directory = await temporary();
+    let requests = 0;
+    const runs = `${directory}/runs`;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        requests++;
+        if (requests === 1)
+          return completion("write_note", simpleDraft(), requests);
+        if (requests === 2) return completion("review_render", {}, requests);
+        if (requests === 3) {
+          const [runName] = await readdir(runs);
+          if (!runName) throw new Error("missing allocated run");
+          await writeFile(
+            `${runs}/${runName}/assets`,
+            "blocks directory creation",
+          );
+          return completionMany(
+            [
+              ["finalize_note", {}],
+              [
+                "capture_figure",
+                { region: { x: 0, y: 0, width: 1, height: 1 } },
+              ],
+            ],
+            requests,
+          );
+        }
+        return new Response("unexpected request", { status: 500 });
+      },
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const result = await executeRun(input, `${directory}/config.yaml`, runs);
+      expect(result).toMatchObject({
+        status: "complete",
+        stopReason: "finalized",
+        exitCode: 0,
+        final: { revision: 1 },
+      });
+      expect(result.error).toBeUndefined();
+      const session = await readFile(
+        `${result.runDirectory}/session/events.jsonl`,
+        "utf8",
+      );
+      expect(session).toContain('"type":"run.error"');
     } finally {
       server.stop(true);
     }

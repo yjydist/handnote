@@ -7,7 +7,7 @@
 | 工具 | 作用 |
 |:----:|:----:|
 | `inspect_source` | 裁剪源图 1 到 8 个归一化区域回图, 受 `maxInspectCalls` 预算约束, 超预算返回可修复错误 (`src/tools/inspect-source.ts:11`) |
-| `capture_figure` | 把一个源图区域物化为 `<run>/assets/figures/figure-NNN.png` 本地 asset 并返回相对路径, 供标准 image 语法引用; 相同区域去重缓存 (`src/tools/capture-figure.ts:11`) |
+| `capture_figure` | 把一个源图区域物化为 `<run>/assets/figures/figure-NNN.png` 本地 asset 并返回相对路径, 供标准 image 语法引用; 相同区域以共享 promise 去重, 首次调用和缓存命中共用 fatal 分类, 失败时清除缓存以允许重试 (`src/tools/capture-figure.ts:11`) |
 | `read_note` | 返回当前 revision 的完整 markdown 与 sha256, 供全文修订前原样恢复 (`src/tools/read-note.ts:6`) |
 | `write_note` | 校验并提交第一份完整初稿 (`{ markdown, audit }`), 渲染, 落盘 `revisions/revision-NNN.md` 并 commit revision; 已有 revision 时返回可修复 `revision_exists` (`src/tools/write-note.ts:121`) |
 | `revise_note` | 全文替换提交新 revision, 同一管线; 无 revision 时返回 `no_revision` (`src/tools/revise-note.ts:11`) |

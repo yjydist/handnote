@@ -38,7 +38,17 @@ export function createFinalizeNoteTool(
         try {
           const revision = eligibility.revision;
           const markdownPath = `${context.runDirectory}/revisions/revision-${String(revision.number).padStart(3, "0")}.md`;
-          const diskSha256 = await sha256File(markdownPath);
+          let diskSha256: string;
+          try {
+            diskSha256 = await sha256File(markdownPath);
+          } catch (error) {
+            throw new HandnoteError(
+              `Cannot read finalized revision markdown: ${markdownPath}`,
+              "filesystem",
+              false,
+              { cause: error },
+            );
+          }
           if (diskSha256 !== revision.markdownSha256)
             throw new HandnoteError(
               `Finalized revision markdown hash mismatch: ${markdownPath}`,

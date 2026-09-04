@@ -1,5 +1,5 @@
-import { z } from "zod";
 import type { PhrasingContent, Root, RootContent, TableCell } from "mdast";
+import { z } from "zod";
 import { parseMarkdownTree } from "./markdown-parse.ts";
 
 export const regionSchema = z

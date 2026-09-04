@@ -188,6 +188,7 @@ $$
       'IMG: "/local.png"',
       '"img": "/local.png"',
       "img",
+      "img, shape: diamond",
       "ImG: '/local.png'",
     ])
       await expectIssues(
@@ -209,12 +210,17 @@ $$
       { runDirectory },
     );
     await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision } \\\"ok\\\"" } --> b\n```',
+      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision } \\"ok\\"" } --> b\n```',
       { runDirectory },
     );
     await parseNoteMarkdown("```mermaid\nflowchart TD\n  click --> node\n```", {
       runDirectory,
     });
+    await expectIssues(
+      "```mermaid\nflowchart TD\n  click node callback\n```",
+      runDirectory,
+      ["link_not_allowed"],
+    );
   });
 
   test("requires the lowercase mermaid fence name", async () => {

@@ -249,19 +249,25 @@ export async function executeRun(
           : "model_stopped_no_revision";
     }
   } catch (error) {
-    terminalError =
+    const runError =
       error instanceof HandnoteError
         ? error
         : new HandnoteError(asError(error).message, "internal", false, {
             cause: error,
           });
-    stopReason = terminalError.kind;
-    if (state.revision) status = "partial";
     recorder.record("run.error", {
-      kind: terminalError.kind,
-      message: terminalError.message,
-      error: safeErrorMetadata(terminalError.cause ?? terminalError),
+      kind: runError.kind,
+      message: runError.message,
+      error: safeErrorMetadata(runError.cause ?? runError),
     });
+    if (state.revision && state.finalizedRevision === state.revision.number) {
+      status = "complete";
+      stopReason = "finalized";
+    } else {
+      terminalError = runError;
+      stopReason = terminalError.kind;
+      if (state.revision) status = "partial";
+    }
   }
 
   let final: RunManifest["final"];

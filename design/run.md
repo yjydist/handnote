@@ -21,4 +21,6 @@ handnote run <image> --config <yaml> --output <dir> [--json]
 
 `manifest.final` 为 `{ markdown: "note.md", image: "note.png", markdownSha256, imageSha256, revision }`. `finalize_note` 在门控通过后重算磁盘 revision 的 sha256 并要求等于 `state.revision.markdownSha256`, 实现 finalize 绑定被 review 的 revision/hash.
 
+同一模型 step 并发工具调用中, 当前 revision 一旦成功 `finalize_note`, 其他工具的 fatal error 仅保留在脱敏 session 诊断中, 不覆盖完成状态; 根产物提交成功后 manifest 固定为 `complete` / `finalized` / exit code 0. 后续产物写入或 cleanup 失败仍覆盖为 `filesystem` failure.
+
 退出码 (`src/run.ts:338`): `complete` → 0, `partial` → 2, `failed` → 1.

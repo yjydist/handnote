@@ -215,6 +215,21 @@ describe("note tool sequencing", () => {
 });
 
 describe("finalize hash binding", () => {
+  test("classifies an unreadable revision file as filesystem", async () => {
+    const directory = await temporary();
+    const { state, tools } = await firstStep(directory);
+    await rm(`${directory}/revisions/revision-001.md`);
+    const finalize = tools.finalize_note.execute;
+    if (!finalize) throw new Error("missing finalize_note");
+    await expect(
+      finalize({}, {} as Parameters<typeof finalize>[1]),
+    ).rejects.toMatchObject({
+      kind: "filesystem",
+      message: expect.stringContaining("Cannot read finalized revision"),
+    });
+    expect(state.finalized).toBe(false);
+  });
+
   test("finalize fails fatally when the revision file on disk no longer matches the reviewed hash", async () => {
     const directory = await temporary();
     const { state, tools } = await firstStep(directory);

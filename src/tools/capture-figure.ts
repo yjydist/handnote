@@ -46,42 +46,36 @@ export function createCaptureFigureTool(
     execute: async (input) => {
       const normalized = captureFigureInputSchema.parse(input);
       const key = JSON.stringify(normalized);
-      const cached = captures.get(key);
-      if (cached) {
-        const output = await cached;
-        context.recorder.record("tool.capture_figure.completed", {
-          input: normalized,
-          output,
-          cacheHit: true,
-        });
-        return output;
+      let pending = captures.get(key);
+      const cacheHit = Boolean(pending);
+      if (!pending) {
+        pending = (async (): Promise<Output> => {
+          const sequence = ++figureSequence;
+          const result = await captureFigure(
+            context.sourcePath,
+            `${context.runDirectory}/assets/figures`,
+            normalized,
+            sequence,
+          );
+          return {
+            ok: true as const,
+            ...result,
+            mimeType: "image/png" as const,
+            summary: `Figure ${result.relativePath} (${result.width}×${result.height}) captured; reference it exactly as ![caption](${result.relativePath})`,
+          };
+        })();
+        captures.set(key, pending);
       }
-      const pending = (async (): Promise<Output> => {
-        const sequence = ++figureSequence;
-        const result = await captureFigure(
-          context.sourcePath,
-          `${context.runDirectory}/assets/figures`,
-          normalized,
-          sequence,
-        );
-        return {
-          ok: true as const,
-          ...result,
-          mimeType: "image/png" as const,
-          summary: `Figure ${result.relativePath} (${result.width}×${result.height}) captured; reference it exactly as ![caption](${result.relativePath})`,
-        };
-      })();
-      captures.set(key, pending);
       try {
         const output = await pending;
         context.recorder.record("tool.capture_figure.completed", {
           input: normalized,
           output,
-          cacheHit: false,
+          cacheHit,
         });
         return output;
       } catch (error) {
-        captures.delete(key);
+        if (captures.get(key) === pending) captures.delete(key);
         return runtime.fatal(error);
       }
     },

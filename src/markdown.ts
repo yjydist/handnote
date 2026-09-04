@@ -137,7 +137,7 @@ function mermaidHasClickDirective(value: string): boolean {
     const target = match[1] ?? "";
     const action = (match[2] ?? "").trimStart();
     if (/^(?:-->|---|-.->|==>)/.test(target)) return false;
-    return /^(?:["']|href\b|call\b|[A-Za-z_$][\w.$]*(?:\s|\())/i.test(action);
+    return /^(?:["']|href\b|call\b|[A-Za-z_$][\w.$]*(?:\s|\(|$))/i.test(action);
   });
 }
 
@@ -201,11 +201,7 @@ function mermaidHasImageAttribute(value: string): boolean {
         index += key.length;
       }
       while (/\s/.test(body[index] ?? "")) index++;
-      if (
-        key.toLowerCase() === "img" &&
-        (body[index] === ":" || body[index] === undefined)
-      )
-        return true;
+      if (key.toLowerCase() === "img") return true;
       let nestedDepth = 0;
       let valueQuote: string | undefined;
       while (index < body.length) {

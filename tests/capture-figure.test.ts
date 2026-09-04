@@ -113,4 +113,45 @@ describe("capture_figure tool", () => {
       "Region exceeds normalized image bounds",
     );
   });
+
+  test("classifies every shared failure, clears the cache, and permits retry", async () => {
+    const directory = await temporary();
+    const source = `${directory}/missing.png`;
+    const state = new RunState();
+    const tools = createHandnoteTools({
+      sourcePath: source,
+      runDirectory: directory,
+      width: 700,
+      maxSteps: 18,
+      maxInspectCalls: 3,
+      toolMedia: { maxEdge: 2048, jpegQuality: 85 },
+      state,
+      recorder: new SessionRecorder(directory),
+    });
+    const execute = tools.capture_figure.execute;
+    if (!execute) throw new Error("missing capture_figure execute");
+    const context = {} as Parameters<typeof execute>[1];
+    const input = { region: { x: 0, y: 0, width: 1, height: 1 } };
+    const failures = await Promise.allSettled([
+      execute(input, context),
+      execute(input, context),
+    ]);
+    expect(failures).toHaveLength(2);
+    for (const failure of failures) {
+      expect(failure.status).toBe("rejected");
+      if (failure.status === "rejected")
+        expect(failure.reason).toMatchObject({ kind: "internal" });
+    }
+    expect(state.fatalError?.kind).toBe("internal");
+
+    await sharp({
+      create: { width: 20, height: 10, channels: 3, background: "white" },
+    })
+      .png()
+      .toFile(source);
+    await expect(execute(input, context)).resolves.toMatchObject({
+      ok: true,
+      relativePath: "assets/figures/figure-002.png",
+    });
+  });
 });
