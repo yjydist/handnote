@@ -118,9 +118,7 @@ function visibleBlocks(tree: Root): string[] {
 const asciiWord = (value: string | undefined): boolean =>
   value !== undefined && /^[A-Za-z0-9_]$/.test(value);
 
-function quoteOccurrences(markdown: string, quote: string): number {
-  const folded = visibleBlocks(parseMarkdownTree(markdown)).join("\0");
-  const needle = foldWhitespace(quote);
+function quoteOccurrences(folded: string, needle: string): number {
   if (!needle) return 0;
   let count = 0;
   let index = folded.indexOf(needle);
@@ -144,12 +142,20 @@ export const revisionDraftSchema = z
   })
   .strict()
   .superRefine((draft, ctx) => {
-    for (const item of [
-      ...draft.audit.corrections,
-      ...draft.audit.uncertainties,
-    ]) {
+    const items = [...draft.audit.corrections, ...draft.audit.uncertainties];
+    if (items.length === 0) return;
+
+    const folded = visibleBlocks(parseMarkdownTree(draft.markdown)).join("\0");
+    const occurrenceCounts = new Map<string, number>();
+    for (const item of items) {
       const required = item.target.occurrence ?? 1;
-      if (quoteOccurrences(draft.markdown, item.target.quote) < required)
+      const needle = foldWhitespace(item.target.quote);
+      let occurrences = occurrenceCounts.get(needle);
+      if (occurrences === undefined) {
+        occurrences = quoteOccurrences(folded, needle);
+        occurrenceCounts.set(needle, occurrences);
+      }
+      if (occurrences < required)
         ctx.addIssue({
           code: "custom",
           message: `Audit ${item.id} quote not found (occurrence ${required})`,

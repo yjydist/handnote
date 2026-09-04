@@ -346,6 +346,42 @@ describe("quote locator validation", () => {
     expect(revisionDraftSchema.safeParse(overlapping).success).toBe(true);
   });
 
+  test("validates many audit targets against a maximum-size note promptly", () => {
+    const quotes = Array.from({ length: 100 }, (_, index) => `word${index}`);
+    const line = `${quotes.join(" ")}\n`;
+    const markdown = line
+      .repeat(Math.ceil(200_000 / line.length))
+      .slice(0, 200_000);
+    const corrections = Array.from({ length: 50 }, (_, index) => ({
+      id: `c${index}`,
+      target: { quote: quotes[index], occurrence: 20 },
+      original: quotes[index] ?? "",
+      corrected: quotes[index] ?? "",
+      basis: "b",
+      region: fullRegion,
+      confidence: 0.95,
+    }));
+    const uncertainties = Array.from({ length: 50 }, (_, index) => ({
+      id: `u${index}`,
+      target: { quote: quotes[index + 50], occurrence: 20 },
+      bestGuess: quotes[index + 50] ?? "",
+      candidates: [quotes[index + 50] ?? "", "term"],
+      basis: "b",
+      region: fullRegion,
+      confidence: 0.5,
+    }));
+
+    const start = performance.now();
+    const parsed = revisionDraftSchema.safeParse({
+      markdown,
+      audit: { corrections, uncertainties },
+    });
+    const elapsed = performance.now() - start;
+
+    expect(parsed.success).toBe(true);
+    expect(elapsed).toBeLessThan(2_000);
+  }, 10_000);
+
   test("rejects quotes that occur too few times", () => {
     expect(revisionDraftSchema.safeParse(draft("重复文本。", 3)).success).toBe(
       false,
