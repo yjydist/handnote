@@ -92,8 +92,12 @@ function phrasingText(nodes: PhrasingContent[]): string {
     .join("");
 }
 
-function visibleBlocks(tree: Root): string[] {
+function visibleBlocks(
+  tree: Root,
+  mermaidTextBlocks: readonly (readonly string[])[] = [],
+): { blocks: string[]; mermaidCount: number } {
   const blocks: string[] = [];
+  let mermaidCount = 0;
   const collect = (node: RootContent | TableCell): void => {
     if (
       node.type === "heading" ||
@@ -103,7 +107,16 @@ function visibleBlocks(tree: Root): string[] {
       blocks.push(phrasingText(node.children));
       return;
     }
-    if (node.type === "code" || node.type === "math") {
+    if (node.type === "code") {
+      if (node.lang === "mermaid") {
+        blocks.push(...(mermaidTextBlocks[mermaidCount] ?? []));
+        mermaidCount++;
+        return;
+      }
+      blocks.push(node.value);
+      return;
+    }
+    if (node.type === "math") {
       blocks.push(node.value);
       return;
     }
@@ -112,7 +125,10 @@ function visibleBlocks(tree: Root): string[] {
         collect(child as RootContent | TableCell);
   };
   for (const child of tree.children) collect(child);
-  return blocks.map(foldWhitespace).filter(Boolean);
+  return {
+    blocks: blocks.map(foldWhitespace).filter(Boolean),
+    mermaidCount,
+  };
 }
 
 const asciiWord = (value: string | undefined): boolean =>
@@ -135,6 +151,39 @@ function quoteOccurrences(folded: string, needle: string): number {
   return count;
 }
 
+function auditTargetValidation(
+  tree: Root,
+  audit: RevisionAudit,
+  mermaidTextBlocks?: readonly (readonly string[])[],
+): { messages: string[]; mermaidCount: number } {
+  const { blocks, mermaidCount } = visibleBlocks(tree, mermaidTextBlocks);
+  const folded = blocks.join("\0");
+  const occurrenceCounts = new Map<string, number>();
+  const messages: string[] = [];
+  for (const item of [...audit.corrections, ...audit.uncertainties]) {
+    const required = item.target.occurrence ?? 1;
+    const needle = foldWhitespace(item.target.quote);
+    let occurrences = occurrenceCounts.get(needle);
+    if (occurrences === undefined) {
+      occurrences = quoteOccurrences(folded, needle);
+      occurrenceCounts.set(needle, occurrences);
+    }
+    if (occurrences < required)
+      messages.push(
+        `Audit ${item.id} quote not found (occurrence ${required})`,
+      );
+  }
+  return { messages, mermaidCount };
+}
+
+export function validateAuditTargets(
+  tree: Root,
+  audit: RevisionAudit,
+  mermaidTextBlocks: readonly (readonly string[])[],
+): string[] {
+  return auditTargetValidation(tree, audit, mermaidTextBlocks).messages;
+}
+
 export const revisionDraftSchema = z
   .object({
     markdown: z.string().min(1),
@@ -145,23 +194,13 @@ export const revisionDraftSchema = z
     const items = [...draft.audit.corrections, ...draft.audit.uncertainties];
     if (items.length === 0) return;
 
-    const folded = visibleBlocks(parseMarkdownTree(draft.markdown)).join("\0");
-    const occurrenceCounts = new Map<string, number>();
-    for (const item of items) {
-      const required = item.target.occurrence ?? 1;
-      const needle = foldWhitespace(item.target.quote);
-      let occurrences = occurrenceCounts.get(needle);
-      if (occurrences === undefined) {
-        occurrences = quoteOccurrences(folded, needle);
-        occurrenceCounts.set(needle, occurrences);
-      }
-      if (occurrences < required)
-        ctx.addIssue({
-          code: "custom",
-          message: `Audit ${item.id} quote not found (occurrence ${required})`,
-          path: ["audit"],
-        });
-    }
+    const validation = auditTargetValidation(
+      parseMarkdownTree(draft.markdown),
+      draft.audit,
+    );
+    if (validation.mermaidCount > 0) return;
+    for (const message of validation.messages)
+      ctx.addIssue({ code: "custom", message, path: ["audit"] });
   });
 
 export type RevisionDraft = z.infer<typeof revisionDraftSchema>;

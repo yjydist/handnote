@@ -97,7 +97,12 @@ flowchart TD
 ${figureMarkdown}
 `;
     const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
-    const result = await renderDocument(note, directory, 1, 900);
+    const { render: result, mermaidTextBlocks } = await renderDocument(
+      note,
+      directory,
+      1,
+      900,
+    );
     expect(result.width).toBe(900);
     expect(result.height).toBeGreaterThan(0);
     expect(result.structure).toEqual({
@@ -108,6 +113,7 @@ ${figureMarkdown}
       diagrams: 1,
       figures: 1,
     });
+    expect(mermaidTextBlocks).toEqual([["开始", "标签", "结束"]]);
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),
     ).toBe(true);
@@ -185,7 +191,7 @@ ${figureMarkdown}
     const note = await parseNoteMarkdown(simpleMarkdown(), {
       runDirectory,
     });
-    const result = await renderDocument(note, runDirectory, 1, 700);
+    const { render: result } = await renderDocument(note, runDirectory, 1, 700);
     expect(result.width).toBe(700);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 30_000);
@@ -278,7 +284,12 @@ ${figureMarkdown}
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const result = await renderDocument(note, directory, 1, 700);
+    const { render: result, mermaidTextBlocks } = await renderDocument(
+      note,
+      directory,
+      1,
+      700,
+    );
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -287,6 +298,7 @@ ${figureMarkdown}
         }),
       ]),
     );
+    expect(mermaidTextBlocks).toEqual([[]]);
   }, 30_000);
 
   test("blocks non-file browser requests during rendering", async () => {
@@ -322,7 +334,7 @@ ${figureMarkdown}
       mathWarnings: [],
     };
     try {
-      const result = await renderDocument(note, directory, 1, 700);
+      const { render: result } = await renderDocument(note, directory, 1, 700);
       expect(result.width).toBe(700);
       expect(await Bun.file(result.imagePath).exists()).toBe(true);
       expect(await Bun.file(result.htmlPath).text()).toContain(probeUrl);

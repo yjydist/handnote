@@ -35,6 +35,11 @@ export interface RenderResult {
   };
 }
 
+export interface RenderDocumentResult {
+  render: RenderResult;
+  mermaidTextBlocks: string[][];
+}
+
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 async function fontCss(): Promise<string> {
@@ -109,7 +114,12 @@ async function screenshotTall(
   htmlPath: string,
   imagePath: string,
   width: number,
-): Promise<{ width: number; height: number; warnings: LayoutWarning[] }> {
+): Promise<{
+  width: number;
+  height: number;
+  warnings: LayoutWarning[];
+  mermaidTextBlocks: string[][];
+}> {
   const context = await browser.newContext({
     viewport: { width, height: 900 },
     deviceScaleFactor: 1,
@@ -138,6 +148,38 @@ async function screenshotTall(
       ),
     );
     const warnings: LayoutWarning[] = [];
+    const mermaidTextBlocks = Array.from(
+      document.querySelectorAll("pre.mermaid"),
+      (block) => {
+        if (block.querySelector(".error-icon")) return [];
+        return Array.from(
+          block.querySelectorAll<SVGElement>("svg text, svg foreignObject"),
+        )
+          .filter(
+            (element) =>
+              element.tagName.toLowerCase() === "foreignobject" ||
+              !element.closest("foreignObject"),
+          )
+          .map((element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return {
+              text: element.textContent ?? "",
+              top: rect.top,
+              left: rect.left,
+              visible:
+                rect.width > 0 &&
+                rect.height > 0 &&
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                style.opacity !== "0",
+            };
+          })
+          .filter((label) => label.visible && label.text.trim().length > 0)
+          .sort((left, right) => left.top - right.top || left.left - right.left)
+          .map((label) => label.text);
+      },
+    );
     const runtime = globalThis as typeof globalThis & {
       __handnoteMermaidError?: string;
     };
@@ -206,7 +248,7 @@ async function screenshotTall(
           ...(id ? { elementId: id } : {}),
         });
     }
-    return { width, height, warnings };
+    return { width, height, warnings, mermaidTextBlocks };
   });
   const segmentHeight = 12_000;
   if (result.height <= segmentHeight) {
@@ -243,7 +285,7 @@ export async function renderDocument(
   runDirectory: string,
   revision: number,
   width: number,
-): Promise<RenderResult> {
+): Promise<RenderDocumentResult> {
   const warnings: LayoutWarning[] = [...note.mathWarnings];
   const directory = `${runDirectory}/intermediate/revisions`;
   const htmlPath = `${directory}/revision-${String(revision).padStart(3, "0")}.html`;
@@ -261,12 +303,15 @@ export async function renderDocument(
     );
     warnings.push(...screenshot.warnings);
     return {
-      htmlPath,
-      imagePath,
-      width: screenshot.width,
-      height: screenshot.height,
-      warnings,
-      structure: note.structure,
+      render: {
+        htmlPath,
+        imagePath,
+        width: screenshot.width,
+        height: screenshot.height,
+        warnings,
+        structure: note.structure,
+      },
+      mermaidTextBlocks: screenshot.mermaidTextBlocks,
     };
   } catch (error) {
     if (error instanceof HandnoteError) throw error;

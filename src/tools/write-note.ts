@@ -4,6 +4,7 @@ import {
   emptyRevisionAudit,
   type RevisionAudit,
   revisionDraftSchema,
+  validateAuditTargets,
 } from "../document.ts";
 import { MarkdownValidationError, parseNoteMarkdown } from "../markdown.ts";
 import { renderDocument } from "../renderer.ts";
@@ -94,12 +95,19 @@ export async function commitNoteDraft(
     );
   if (!note) throw new Error("parseNoteMarkdown returned without a value");
   const number = (context.state.revision?.number ?? 0) + 1;
-  const render = await renderDocument(
+  const { render, mermaidTextBlocks } = await renderDocument(
     note,
     context.runDirectory,
     number,
     context.width,
   );
+  const auditTargetErrors = validateAuditTargets(
+    note.tree,
+    audit,
+    mermaidTextBlocks,
+  );
+  if (auditTargetErrors.length > 0)
+    return toolError("invalid_audit", auditTargetErrors.join("; "));
   const markdownSha256 = sha256(parsed.markdown);
   const revisionPath = `${context.runDirectory}/revisions/revision-${String(number).padStart(3, "0")}.md`;
   await atomicWrite(revisionPath, parsed.markdown);

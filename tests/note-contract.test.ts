@@ -191,6 +191,75 @@ describe("note tool sequencing", () => {
     expect(state.revision).toBeUndefined();
   });
 
+  test("write_note validates audit targets against rendered Mermaid labels", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    state.beginModelStep();
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    const markdown = [
+      "Visible label",
+      "",
+      "```mermaid",
+      "flowchart TD",
+      '  internal_id["Visible label"] -->|Edge label| b[End]',
+      "```",
+    ].join("\n");
+    const uncertainty = (id: string, quote: string, occurrence?: number) => ({
+      id,
+      target: { quote, ...(occurrence ? { occurrence } : {}) },
+      bestGuess: quote,
+      candidates: [quote, "alternative"],
+      basis: "b",
+      region: fullRegion,
+      confidence: 0.5,
+    });
+
+    const rejected = await execute(
+      {
+        markdown,
+        audit: {
+          uncertainties: [
+            uncertainty("u1", "flowchart TD"),
+            uncertainty("u2", "internal_id"),
+            uncertainty("u3", "Visible label Edge label"),
+          ],
+        },
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: "invalid_audit" },
+    });
+    const rejectedMessage = (rejected as { error?: { message?: string } }).error
+      ?.message;
+    for (const id of ["u1", "u2", "u3"])
+      expect(rejectedMessage).toContain(`Audit ${id} quote not found`);
+    expect(state.revision).toBeUndefined();
+    expect(
+      await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+    ).toBe(false);
+
+    const accepted = await execute(
+      {
+        markdown,
+        audit: {
+          uncertainties: [
+            uncertainty("u4", "Visible label", 2),
+            uncertainty("u5", "Edge label"),
+          ],
+        },
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(accepted).toMatchObject({ ok: true, revision: 1 });
+    expect(state.revision?.audit.uncertainties).toHaveLength(2);
+    expect(state.revision?.render).not.toHaveProperty("mermaidTextBlocks");
+    const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
+    expect(session).not.toContain("mermaidTextBlocks");
+  });
+
   test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
     const directory = await temporary();
     const { tools } = await setup(directory);

@@ -16,6 +16,6 @@
 
 工具工厂统一签名 `(context: ToolContext, runtime: ToolRuntime)` (`read_note` 无副作用, 不需要 runtime); `index.ts` 先经 `createToolRuntime` (`src/tools/shared.ts:40`) 创建共享闭包状态 (`modelMedia` 缓存 / `fatal` / `mediaOutputWithFatal`, purpose 联合类型含 `inspect_source` / `review_render` / `capture_figure`), 再组装 7 个工具. `ToolContext` 定义于 `src/tools/types.ts:5`; `toolError` / `remainingSteps` / `layoutSummary` 为纯函数 (`src/tools/shared.ts:6`).
 
-`write_note` 与 `revise_note` 共享 `commitNoteDraft` (`src/tools/write-note.ts:52`): `revisionDraftSchema` parse (失败 → 可修复 `invalid_audit`) → `parseNoteMarkdown` 校验 (失败 → 可修复 `invalid_markdown`, issues 格式化列出) → 渲染 → revision markdown 原字节落盘 → `state.commit`. 渲染是隐式的, 没有 render_note 工具.
+`write_note` 与 `revise_note` 共享 `commitNoteDraft` (`src/tools/write-note.ts:52`): `revisionDraftSchema` parse (结构错误或无 Mermaid 文档的 locator 失败 → 可修复 `invalid_audit`) → `parseNoteMarkdown` 校验 (失败 → 可修复 `invalid_markdown`, issues 格式化列出) → 渲染并提取瞬时 Mermaid 可见标签 → 最终 locator 校验 (失败 → 可修复 `invalid_audit`) → revision markdown 原字节落盘 → `state.commit`. 瞬时标签不进入 state / manifest / session. 渲染是隐式的, 没有 render_note 工具.
 
 收敛门控由 `RunState.canFinalize` (`src/state.ts:77`) 实现: 必须满足 (渲染 → 后续步审查 → 再后续步 finalize) 的时序, 且审查时无阻塞布局警告; 任何 commit (变更) 都会产生新 revision, 使旧审查资格失效. 收敛出口为 `complete` / `partial` / `failed`, 对应 `stopReason` 取值 `finalized` / `max_steps` / `model_stopped` / `max_steps_no_revision` / `model_stopped_no_revision` / 错误 kind (`src/run.ts:238`).
