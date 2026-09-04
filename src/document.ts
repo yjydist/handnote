@@ -1,6 +1,11 @@
-import type { PhrasingContent, Root, RootContent, TableCell } from "mdast";
+import type { Root } from "mdast";
 import { z } from "zod";
 import { parseMarkdownTree } from "./markdown-parse.ts";
+import {
+  type AuditTextEvidence,
+  analyzeMarkdownSemantics,
+  foldWhitespace,
+} from "./markdown-semantics.ts";
 
 export const regionSchema = z
   .object({
@@ -71,88 +76,6 @@ export const revisionAuditSchema = z
 
 export type RevisionAudit = z.infer<typeof revisionAuditSchema>;
 
-const foldWhitespace = (value: string): string =>
-  value.replace(/\s+/g, " ").trim();
-
-export interface AuditTextEvidence {
-  mermaidTextBlocks: readonly (readonly string[])[];
-  mathTextBlocks: readonly string[];
-}
-
-interface VisibleTextState {
-  evidence?: AuditTextEvidence;
-  mermaidCount: number;
-  mathCount: number;
-}
-
-function phrasingText(
-  nodes: PhrasingContent[],
-  state: VisibleTextState,
-): string {
-  return nodes
-    .map((node) => {
-      if (node.type === "text" || node.type === "inlineCode") return node.value;
-      if (node.type === "inlineMath") {
-        const value = state.evidence?.mathTextBlocks[state.mathCount] ?? "";
-        state.mathCount++;
-        return value;
-      }
-      if (node.type === "image" || node.type === "imageReference")
-        return node.alt ?? "";
-      if (node.type === "break") return " ";
-      if ("children" in node) return phrasingText(node.children, state);
-      return "";
-    })
-    .join("");
-}
-
-function visibleBlocks(
-  tree: Root,
-  evidence?: AuditTextEvidence,
-): { blocks: string[]; mermaidCount: number; mathCount: number } {
-  const blocks: string[] = [];
-  const state: VisibleTextState = {
-    ...(evidence ? { evidence } : {}),
-    mermaidCount: 0,
-    mathCount: 0,
-  };
-  const collect = (node: RootContent | TableCell): void => {
-    if (
-      node.type === "heading" ||
-      node.type === "paragraph" ||
-      node.type === "tableCell"
-    ) {
-      blocks.push(phrasingText(node.children, state));
-      return;
-    }
-    if (node.type === "code") {
-      if (node.lang === "mermaid") {
-        blocks.push(
-          ...(state.evidence?.mermaidTextBlocks[state.mermaidCount] ?? []),
-        );
-        state.mermaidCount++;
-        return;
-      }
-      blocks.push(node.value);
-      return;
-    }
-    if (node.type === "math") {
-      blocks.push(state.evidence?.mathTextBlocks[state.mathCount] ?? "");
-      state.mathCount++;
-      return;
-    }
-    if ("children" in node)
-      for (const child of node.children)
-        collect(child as RootContent | TableCell);
-  };
-  for (const child of tree.children) collect(child);
-  return {
-    blocks: blocks.map(foldWhitespace).filter(Boolean),
-    mermaidCount: state.mermaidCount,
-    mathCount: state.mathCount,
-  };
-}
-
 const asciiWord = (value: string | undefined): boolean =>
   value !== undefined && /^[A-Za-z0-9_]$/.test(value);
 
@@ -178,7 +101,10 @@ function auditTargetValidation(
   audit: RevisionAudit,
   evidence?: AuditTextEvidence,
 ): { messages: string[]; mermaidCount: number; mathCount: number } {
-  const { blocks, mermaidCount, mathCount } = visibleBlocks(tree, evidence);
+  const { blocks, mermaidCount, mathCount } = analyzeMarkdownSemantics(
+    tree,
+    evidence,
+  );
   const folded = blocks.join("\0");
   const occurrenceCounts = new Map<string, number>();
   const messages: string[] = [];

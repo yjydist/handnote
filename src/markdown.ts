@@ -10,6 +10,7 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { parseMarkdownTree } from "./markdown-parse.ts";
+import { hasPotentialSemanticContent } from "./markdown-semantics.ts";
 import type { LayoutWarning } from "./renderer.ts";
 
 export const maxMarkdownLength = 200_000;
@@ -456,11 +457,6 @@ export async function parseNoteMarkdown(
       code: "markdown_too_large",
       message: `Markdown exceeds ${maxMarkdownLength} characters: ${markdown.length}`,
     });
-  if (markdown.trim().length === 0)
-    issues.push({
-      code: "empty_document",
-      message: "Markdown document must contain visible content",
-    });
   if (/^---\s*(\n|$)/.test(markdown))
     issues.push({
       code: "frontmatter_unsupported",
@@ -475,6 +471,11 @@ export async function parseNoteMarkdown(
     });
   issues.push(...validateIssues(tree));
   issues.push(...(await missingFigures(tree, options.runDirectory)));
+  if (issues.length === 0 && !hasPotentialSemanticContent(tree))
+    issues.push({
+      code: "empty_document",
+      message: "Markdown document must contain visible content",
+    });
   if (issues.length > 0) throw new MarkdownValidationError(issues);
   const anchors = anchorTree(tree);
   return {

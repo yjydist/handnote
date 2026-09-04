@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
-import type { AuditTextEvidence } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import type { NoteMarkdown } from "./markdown.ts";
 import { noteMarkdownToHtml } from "./markdown.ts";
+import type { AuditTextEvidence } from "./markdown-semantics.ts";
 import { atomicWrite } from "./utils.ts";
 
 export interface LayoutWarning {

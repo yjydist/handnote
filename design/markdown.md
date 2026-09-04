@@ -11,7 +11,7 @@ GFM Markdown 是笔记的 canonical 持久化格式 (模型的心智模型与磁
 | code | 触发条件 |
 |:----:|:----:|
 | `markdown_too_large` | 超过 200_000 字符 (`maxMarkdownLength`) |
-| `empty_document` | 空白文档 |
+| `empty_document` | mdast 不含可见文本、非空普通 code、任务状态、本地图片或等待渲染确认的 math / Mermaid；空 heading / code / list / table 与纯分隔线均为空文档 |
 | `frontmatter_unsupported` | 首行 `---` (文本预检, 不用 remark-frontmatter) |
 | `raw_html` | 任何 mdast `html` 节点 (含段内 inline HTML), 以及 mermaid code block 内的 HTML markup (含普通 / 闭合 / 自闭合 / 大小写 / 跨行属性标签, 注释, 声明, CDATA 与 processing instruction) |
 | `link_not_allowed` | 任何 `link` (含 GFM autolink literal, 裸 URL 即 link), 非图片 `definition`, footnote reference/definition; 含 mermaid code block 内行首或分号分隔的 click 指令 / markdown 链接 / 任意大小写的 `img` 节点属性 / URL scheme `https?://` (静态文本校验) |
@@ -38,4 +38,4 @@ inline 变换插件在 KaTeX 前执行 Mermaid 替换、display math 锚点包�
 
 ## 禁止事项
 
-自定义 Markdown 语法, 自定义 mdast 节点, directive, raw HTML, frontmatter, 任何链接 (外部 URL 写成 inline code), 引用式图片, 外部资源请求. 数学只用 `$...$` / `$$...$$` (KaTeX), 非公式美元符号必须转义为 `\$`; Mermaid 只用语言名精确为小写 `mermaid` 的标准 fenced code block, block 内不得包含 HTML markup 或通过标签嵌入媒体; 源图裁片先经 `capture_figure` 物化为本地 asset 再用标准内联 image 语法引用. Markdown 校验与 audit quote-locator 共用同一套 remark-parse + remark-gfm + remark-math 解析配置; quote 在 heading / paragraph / table cell / 普通 code / image alt 的可见文本中定位, Mermaid 只使用渲染 SVG 的可见 text / foreignObject 标签, math 只使用排除 TeX annotation 后的 KaTeX MathML 语义文本 (解析失败时使用可见 fallback), 两者均不使用源码. 块间不拼接, ASCII 单词和数字遵守词边界, occurrence 允许重叠命中.
+自定义 Markdown 语法, 自定义 mdast 节点, directive, raw HTML, frontmatter, 任何链接 (外部 URL 写成 inline code), 引用式图片, 外部资源请求. 数学只用 `$...$` / `$$...$$` (KaTeX), 非公式美元符号必须转义为 `\$`; Mermaid 只用语言名精确为小写 `mermaid` 的标准 fenced code block, block 内不得包含 HTML markup 或通过标签嵌入媒体; 源图裁片先经 `capture_figure` 物化为本地 asset 再用标准内联 image 语法引用. Markdown 非空检查与 audit quote-locator 共用 `markdown-semantics.ts` 的 mdast 投影; quote 在 heading / paragraph / table cell / 普通 code / image alt 的可见文本中定位, Mermaid 只使用渲染 SVG 的可见 text / foreignObject 标签, math 只使用排除 TeX annotation 后的 KaTeX MathML 语义文本 (解析失败时使用可见 fallback), 两者均不使用源码. 块间不拼接, ASCII 单词和数字遵守词边界, occurrence 允许重叠命中.

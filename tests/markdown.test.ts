@@ -111,6 +111,28 @@ $$
     await expectIssues("   \n\n", runDirectory, ["empty_document"]);
   });
 
+  test("rejects syntax-only Markdown without semantic content", async () => {
+    const runDirectory = await temporary();
+    for (const markdown of [
+      "```\n```",
+      "```ts\n```",
+      "#",
+      "-",
+      "| |\n| - |",
+      "***",
+    ])
+      await expectIssues(markdown, runDirectory, ["empty_document"]);
+
+    for (const markdown of [
+      "```ts\nconst value = 1;\n```",
+      "Only text.",
+      "$x$",
+      "- [x] task",
+      "```mermaid\nflowchart TD\n```",
+    ])
+      await parseNoteMarkdown(markdown, { runDirectory });
+  });
+
   test("rejects oversized markdown", async () => {
     const runDirectory = await temporary();
     await expectIssues("正".repeat(maxMarkdownLength + 1), runDirectory, [

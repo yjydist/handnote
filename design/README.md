@@ -19,6 +19,7 @@ Handnote 是一个 Agent 项目: 输入一张手写笔记图片, 通过 VLM (视
 | `src/config.ts` | 配置 schema 与加载, 解析 YAML 并内联 prompt 文本 (`src/config.ts:41`) |
 | `src/document.ts` | 契约 schema, `Region` / quote-locator 审计 / `revisionDraftSchema` (`src/document.ts:83`) |
 | `src/markdown.ts` | unified 管线, 严格 GFM 校验, 锚点, 自包含 HTML (`src/markdown.ts:220`) |
+| `src/markdown-semantics.ts` | 共享 mdast 可见文本、非空语义与渲染证据投影 |
 | `src/image.ts` | 图像处理, `inspect_source` 裁剪, `capture_figure` 物化, 模型预览 (`src/image.ts:239`) |
 | `src/provider/` | Provider 抽象目录, 入口 `index.ts` 协议分派; `retry.ts` 重试传输; `openai-compatible.ts` 唯一适配器 (`src/provider/index.ts:26`) |
 | `src/agent.ts` | Agent 循环, 构造 Mastra `Agent` 并执行 `generate` (`src/agent.ts:67`) |
