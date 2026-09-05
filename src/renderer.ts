@@ -5,23 +5,11 @@ import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
 import { parseSrcset } from "srcset";
 import { HandnoteError } from "./errors.ts";
-import {
-  type CompiledNote,
-  MarkdownValidationError,
-  type NoteStructure,
-} from "./markdown.ts";
+import { type CompiledNote, MarkdownValidationError } from "./markdown.ts";
+import type { LayoutWarning, NoteStructure } from "./render-metadata.ts";
 import { atomicWrite } from "./utils.ts";
 
-export interface LayoutWarning {
-  code: string;
-  message: string;
-  blocking: boolean;
-  elementId?: string;
-  axis?: "horizontal";
-  overflowPx?: number;
-  containerPx?: number;
-  contentPx?: number;
-}
+export type { LayoutWarning } from "./render-metadata.ts";
 
 export interface RenderResult {
   htmlPath: string;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { layoutWarningSchema, noteStructureSchema } from "./render-metadata.ts";
 
 const relativePath = z
   .string()
@@ -17,28 +18,6 @@ const artifactSchema = z
   .object({ path: relativePath, sha256: z.string().regex(/^[a-f0-9]{64}$/) })
   .strict();
 export type Artifact = z.infer<typeof artifactSchema>;
-const warningSchema = z
-  .object({
-    code: z.string(),
-    message: z.string(),
-    blocking: z.boolean(),
-    elementId: z.string().optional(),
-    axis: z.literal("horizontal").optional(),
-    overflowPx: z.number().optional(),
-    containerPx: z.number().optional(),
-    contentPx: z.number().optional(),
-  })
-  .strict();
-const structureSchema = z
-  .object({
-    headings: z.number(),
-    blocks: z.number(),
-    tables: z.number(),
-    equations: z.number(),
-    diagrams: z.number(),
-    figures: z.number(),
-  })
-  .strict();
 const revisionSchema = z
   .object({
     number: z.int().positive(),
@@ -48,8 +27,8 @@ const revisionSchema = z
     assets: z.array(artifactSchema),
     width: z.int().positive(),
     height: z.int().positive(),
-    warnings: z.array(warningSchema),
-    structure: structureSchema,
+    warnings: z.array(layoutWarningSchema),
+    structure: noteStructureSchema,
     renderedAtStep: z.int().nonnegative(),
     commitEventSeq: z.int().positive(),
   })
