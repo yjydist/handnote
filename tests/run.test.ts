@@ -1,16 +1,19 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { HandnoteError } from "../src/errors.ts";
 import { executeRun, validateInput } from "../src/run.ts";
+import { readSession } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
 import { sha256File } from "../src/utils.ts";
 import { fullRegion, simpleDraft } from "./helpers.ts";
@@ -123,12 +126,139 @@ async function writeRunInputs(
   await writeFile(`${directory}/prompt.md`, "Use tools.");
   await writeFile(
     `${directory}/config.yaml`,
-    `model:\n  baseUrl: ${baseUrl}\n  apiKey: ${apiKey}\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nprompt:\n  file: prompt.md\nmaxSteps: 8\nwidth: 700\n`,
+    `model:\n  baseUrl: ${baseUrl}\n  apiKey: ${JSON.stringify(apiKey)}\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nprompt:\n  file: prompt.md\nmaxSteps: 8\nwidth: 700\n`,
   );
   return inputPath;
 }
 
 describe("run controller", () => {
+  test("inspection cleanup never follows a linked intermediate directory", async () => {
+    const directory = await temporary();
+    const outside = `${directory}/outside`;
+    const marker = `${outside}/inspections/keep.png`;
+    await mkdir(`${outside}/inspections`, { recursive: true });
+    await writeFile(marker, "unrelated inspection");
+    const runs = `${directory}/runs`;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        const [runName] = await readdir(runs);
+        if (!runName) throw new Error("Missing run");
+        await symlink(outside, `${runs}/${runName}/intermediate`);
+        return textCompletion(1);
+      },
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const config = `${directory}/config.yaml`;
+      await writeFile(
+        config,
+        `${await readFile(config, "utf8")}saveIntermediateImages: false\n`,
+      );
+      const result = await executeRun(input, config, runs);
+      expect(result.exitCode).toBe(1);
+      expect(await readFile(marker, "utf8")).toBe("unrelated inspection");
+      expect(
+        readSession(`${result.runDirectory}/session/events.jsonl`).events.some(
+          (event) => event.type === "cleanup.failed",
+        ),
+      ).toBe(true);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test.each(["a", "1"])(
+    "completes and reopens with short API key %s while redacting free text",
+    async (apiKey) => {
+      const directory = await temporary();
+      const draft = simpleDraft();
+      draft.audit.uncertainties.push({
+        id: "uncertainText",
+        target: { quote: "这是正文。" },
+        bestGuess: "这是正文。",
+        candidates: ["这是正文。", "这是证文。"],
+        basis: `credential=${apiKey}`,
+        region: fullRegion,
+        confidence: 0.7,
+      });
+      const script: Array<[string, unknown]> = [
+        ["write_note", draft],
+        ["review_render", {}],
+        ["finalize_note", {}],
+      ];
+      let requests = 0;
+      const server = Bun.serve({
+        port: 0,
+        fetch(request) {
+          expect(request.headers.get("authorization")).toBe(`Bearer ${apiKey}`);
+          const item = script[requests++];
+          return item
+            ? completion(item[0], item[1], requests)
+            : textCompletion(requests);
+        },
+      });
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          apiKey,
+        );
+        const result = await executeRun(
+          input,
+          `${directory}/config.yaml`,
+          `${directory}/runs`,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.manifest.status).toBe("complete");
+        if (!result.manifest.final) throw new Error("Missing final output");
+        for (const mode of ["read", "recover"] as const) {
+          const reopened = await RunStore.open(result.runDirectory, {
+            mode,
+            secrets: [apiKey],
+          });
+          expect(reopened.manifest.final).toEqual(result.manifest.final);
+          expect(reopened.manifest.model).toEqual(result.manifest.model);
+        }
+        const events = readSession(
+          `${result.runDirectory}/session/events.jsonl`,
+        ).events;
+        const revision = result.manifest.revisions[0];
+        if (!revision) throw new Error("Missing revision");
+        for (const seq of [
+          revision.commitEventSeq,
+          result.manifest.reviewedRevision?.eventSeq,
+          result.manifest.final?.eventSeq,
+        ]) {
+          if (!seq) throw new Error("Missing confirmed event");
+          expect(events[seq - 1]?.data).toMatchObject({
+            markdownSha256: revision.markdown.sha256,
+            imageSha256: revision.image.sha256,
+          });
+        }
+        const commit = events[revision.commitEventSeq - 1]?.data as {
+          audit: typeof draft.audit;
+        };
+        expect(commit.audit.uncertainties[0]?.basis).not.toBe(
+          `credential=${apiKey}`,
+        );
+        expect(commit.audit.uncertainties[0]?.basis).toContain("[REDACTED]");
+        expect(await sha256File(`${result.runDirectory}/output/note.md`)).toBe(
+          revision.markdown.sha256,
+        );
+        expect(await sha256File(`${result.runDirectory}/output/note.png`)).toBe(
+          revision.image.sha256,
+        );
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
+
   test.each(["complete", "partial"] as const)(
     "retains complete revisions while cleaning inspections for a %s run",
     async (expected) => {

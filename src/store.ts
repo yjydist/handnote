@@ -6,11 +6,10 @@ import {
   open,
   readdir,
   readFile,
-  realpath,
   rename,
   rm,
 } from "node:fs/promises";
-import { basename, resolve, sep } from "node:path";
+import { basename, resolve } from "node:path";
 import { revisionDraftSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import {
@@ -23,6 +22,7 @@ import {
 import { compileNoteMarkdown } from "./markdown.ts";
 import type { RedactionOptions } from "./redact.ts";
 import { renderDocument } from "./renderer.ts";
+import { checkedRunPath } from "./run-path.ts";
 import { readSession, type SessionEvent, SessionRecorder } from "./session.ts";
 import { atomicWrite, isoWithOffset, sha256 } from "./utils.ts";
 
@@ -70,7 +70,8 @@ export class RunStore {
     if (await exists(`${directory}/run.json`))
       throw new HandnoteError("Run manifest already exists", "filesystem");
     await mkdir(directory, { recursive: true });
-    const recorder = new SessionRecorder(resolve(directory), options);
+    new RunStore(directory).validatePaths();
+    const recorder = SessionRecorder.create(resolve(directory), options);
     const store = new RunStore(directory, recorder);
     const startedAt = options.startedAt ?? isoWithOffset();
     recorder.record("run.created", { formatVersion: 1 });
@@ -93,13 +94,16 @@ export class RunStore {
     options: { mode?: "read" | "recover" } & RedactionOptions = {},
   ): Promise<RunStore> {
     const reader = new RunStore(directory);
+    reader.validatePaths();
     const manifest = reader.manifest;
     const session = readSession(reader.path(manifest.session));
     await reader.verify(manifest, session.events);
     if (options.mode !== "recover") return reader;
-    const recorder = new SessionRecorder(reader.directory, options);
+    const uncommitted = await reader.uncommittedPaths(manifest);
+    const recorder = SessionRecorder.open(reader.directory, options);
     const store = new RunStore(directory, recorder);
-    await store.cleanUncommitted(manifest);
+    for (const path of uncommitted)
+      await rm(store.path(path), { recursive: true, force: true });
     await store.updateModel(modelFromEvents(session.events));
     if (manifest.status === "running") await store.finish("interrupted");
     recorder.record("run.recovered", { status: store.manifest.status });
@@ -127,7 +131,22 @@ export class RunStore {
   }
 
   path(relativePath: string): string {
-    return resolve(this.directory, relativePath);
+    return checkedRunPath(this.directory, relativePath);
+  }
+
+  private validatePaths(): void {
+    for (const path of [
+      "input",
+      "session",
+      "assets/figures",
+      "intermediate/revisions",
+      "intermediate/inspections",
+      "output",
+      "output.tmp",
+    ])
+      checkedRunPath(this.directory, path, { kind: "directory" });
+    for (const path of ["run.json", "session/events.jsonl"])
+      checkedRunPath(this.directory, path, { kind: "file" });
   }
 
   private async transaction<T>(operation: () => Promise<T>): Promise<T> {
@@ -160,9 +179,7 @@ export class RunStore {
   }
 
   private async persist(manifest: RunManifest): Promise<void> {
-    const parsed = runManifestSchema.safeParse(
-      this.recorder.sanitize(manifest),
-    );
+    const parsed = runManifestSchema.safeParse(manifest);
     if (!parsed.success)
       throw new HandnoteError(
         "Cannot serialize a valid run manifest",
@@ -171,6 +188,12 @@ export class RunStore {
         { cause: parsed.error },
       );
     const safe = parsed.data;
+    safe.runId = this.recorder.sanitize(safe.runId);
+    if (safe.error)
+      safe.error.message = this.recorder.sanitize(safe.error.message);
+    for (const revision of safe.revisions)
+      for (const warning of revision.warnings)
+        warning.message = this.recorder.sanitize(warning.message);
     await atomicWrite(
       this.path("run.json"),
       `${JSON.stringify(safe, null, 2)}\n`,
@@ -179,10 +202,10 @@ export class RunStore {
 
   private async bytes(artifact: Artifact): Promise<Buffer> {
     try {
-      const root = await realpath(this.directory);
-      const path = await realpath(this.path(artifact.path));
-      if (!path.startsWith(`${root}${sep}`))
-        throw new Error("Artifact escapes run directory");
+      const path = checkedRunPath(this.directory, artifact.path, {
+        kind: "file",
+        allowMissing: false,
+      });
       const bytes = await readFile(path);
       if (sha256(bytes) !== artifact.sha256) throw new Error("hash mismatch");
       return bytes;
@@ -206,13 +229,44 @@ export class RunStore {
     const markdown = await this.bytes(revision.markdown);
     for (const artifact of [revision.html, revision.image, ...revision.assets])
       await this.bytes(artifact);
-    return { ...revision, text: markdown.toString("utf8") };
+    const text = markdown.toString("utf8");
+    try {
+      const note = await compileNoteMarkdown(text, {
+        runDirectory: this.directory,
+      });
+      const assets = new Map(
+        revision.assets.map((asset) => [asset.path, asset.sha256]),
+      );
+      if (
+        assets.size !== revision.assets.length ||
+        assets.size !== note.assets.length ||
+        note.assets.some((asset) => assets.get(asset.path) !== asset.sha256)
+      )
+        throw new Error("Referenced resources do not match the revision index");
+    } catch (error) {
+      throw new HandnoteError(
+        "Committed revision resources cannot be verified",
+        "filesystem",
+        false,
+        { cause: error },
+      );
+    }
+    return { ...revision, text };
   }
 
   private async verify(
     manifest: RunManifest,
     events: SessionEvent[],
   ): Promise<void> {
+    const creation = events[0];
+    if (
+      creation?.type !== "run.created" ||
+      (creation.data as { formatVersion?: number } | null)?.formatVersion !== 1
+    )
+      throw new HandnoteError(
+        "Run session is missing its creation event",
+        "filesystem",
+      );
     if (manifest.input.sha256)
       await this.bytes({
         path: manifest.input.path,
@@ -339,7 +393,8 @@ export class RunStore {
         for (const asset of note.assets) await this.bytes(asset);
         await rename(this.path(temporary), this.path(directory));
         promoted = true;
-        const event = this.recorder.record("document.revision.committed", {
+        const event = this.recorder.recordRevision({
+          type: "document.revision.committed",
           revision: number,
           markdownSha256: markdown.sha256,
           imageSha256: image.sha256,
@@ -398,7 +453,8 @@ export class RunStore {
         );
       await prepare(revision);
       await this.readRevision(revision.number);
-      const event = this.recorder.record("render.reviewed", {
+      const event = this.recorder.recordRevision({
+        type: "render.reviewed",
         revision: revision.number,
         markdownSha256: revision.markdown.sha256,
         imageSha256: revision.image.sha256,
@@ -475,7 +531,8 @@ export class RunStore {
         await this.readRevision(revision.number);
         await rename(this.path("output.tmp"), this.path("output"));
         promoted = true;
-        const event = this.recorder.record("note.finalized", {
+        const event = this.recorder.recordRevision({
+          type: "note.finalized",
           revision: revision.number,
           markdownSha256: review.markdownSha256,
           imageSha256: review.imageSha256,
@@ -549,7 +606,8 @@ export class RunStore {
     });
   }
 
-  private async cleanUncommitted(manifest: RunManifest): Promise<void> {
+  private async uncommittedPaths(manifest: RunManifest): Promise<string[]> {
+    const paths: string[] = [];
     const known = new Set(
       manifest.revisions.map((revision) =>
         String(revision.number).padStart(4, "0"),
@@ -561,21 +619,21 @@ export class RunStore {
       throw error;
     })) {
       if (/^\.\d+\.tmp$/.test(name) || (/^\d+$/.test(name) && !known.has(name)))
-        await rm(`${parent}/${name}`, { recursive: true, force: true });
+        paths.push(`intermediate/revisions/${name}`);
     }
-    await rm(this.path("output.tmp"), { recursive: true, force: true });
-    if (!manifest.final)
-      await rm(this.path("output"), { recursive: true, force: true });
+    paths.push("output.tmp");
+    if (!manifest.final) paths.push("output");
     for (const name of await readdir(this.path("input")).catch((error) => {
       if (error.code === "ENOENT") return [];
       throw error;
     })) {
       if (name.startsWith(`${basename(manifest.input.path)}.tmp-`))
-        await rm(this.path(`input/${name}`), { force: true });
+        paths.push(`input/${name}`);
     }
     for (const name of await readdir(this.directory))
-      if (/^run\.json\.tmp-[a-f0-9]+$/.test(name))
-        await rm(this.path(name), { force: true });
+      if (/^run\.json\.tmp-[a-f0-9]+$/.test(name)) paths.push(name);
+    for (const path of paths) this.path(path);
+    return paths;
   }
 }
 

@@ -12,8 +12,10 @@ import remarkRehype from "remark-rehype";
 import { parseSrcset, stringifySrcset } from "srcset";
 import { unified } from "unified";
 import { SKIP, visit } from "unist-util-visit";
+import { HandnoteError } from "./errors.ts";
 import type { Artifact } from "./manifest.ts";
 import type { LayoutWarning } from "./renderer.ts";
+import { checkedRunPath } from "./run-path.ts";
 import { sha256 } from "./utils.ts";
 
 export const maxMarkdownLength = 200_000;
@@ -111,17 +113,20 @@ async function figureDataUri(
   if (!path.startsWith(figures))
     fail("invalid_image_path", `Image is outside assets/figures/: ${src}`);
   try {
-    const actual = await realpath(path);
-    if (!actual.startsWith(figures))
-      fail(
-        "invalid_image_path",
-        `Image resolves outside assets/figures/: ${src}`,
-      );
+    const actual = checkedRunPath(root, relative(root, path), {
+      kind: "file",
+      allowMissing: false,
+    });
     const data = await readFile(actual);
     const assetPath = relative(root, actual);
     assets.set(assetPath, { path: assetPath, sha256: sha256(data) });
     return `data:image/png;base64,${data.toString("base64")}`;
   } catch (error) {
+    if (error instanceof HandnoteError)
+      fail(
+        "invalid_image_path",
+        `Images must be regular files without symbolic links: ${src}`,
+      );
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       fail("missing_figure", `Captured figure does not exist: ${src}`);
     throw error;

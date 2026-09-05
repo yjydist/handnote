@@ -53,7 +53,7 @@ export function createCaptureFigureTool(
       if (!pending) {
         pending = (async (): Promise<Output> => {
           initialSequence ??= readdir(
-            `${context.runDirectory}/assets/figures`,
+            context.store.path("assets/figures"),
           ).then(
             (names) =>
               Math.max(
@@ -72,7 +72,7 @@ export function createCaptureFigureTool(
           const sequence = figureSequence;
           const result = await captureFigure(
             context.sourcePath,
-            `${context.runDirectory}/assets/figures`,
+            context.store.path("assets/figures"),
             normalized,
             sequence,
           );

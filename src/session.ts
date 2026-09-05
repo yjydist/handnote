@@ -1,5 +1,12 @@
-import { appendFileSync, mkdirSync, readFileSync, truncateSync } from "node:fs";
-import { dirname, relative } from "node:path";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, relative, resolve } from "node:path";
+import type { RevisionAudit } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import {
   type RedactionContext,
@@ -7,6 +14,7 @@ import {
   redactionContext,
   redactValue,
 } from "./redact.ts";
+import { checkedRunPath } from "./run-path.ts";
 import { isoWithOffset, sha256File } from "./utils.ts";
 
 export interface SessionEvent {
@@ -15,6 +23,15 @@ export interface SessionEvent {
   type: string;
   data: unknown;
 }
+
+type RevisionEvent = {
+  revision: number;
+  markdownSha256: string;
+  imageSha256: string;
+} & (
+  | { type: "document.revision.committed"; audit: RevisionAudit }
+  | { type: "render.reviewed" | "note.finalized"; step: number }
+);
 
 export function readSession(path: string): {
   events: SessionEvent[];
@@ -25,9 +42,12 @@ export function readSession(path: string): {
   try {
     bytes = readFileSync(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT")
-      return { events: [], completeBytes: 0, trailingBytes: 0 };
-    throw error;
+    throw new HandnoteError(
+      "Cannot read existing session log",
+      "filesystem",
+      false,
+      { cause: error },
+    );
   }
   const completeBytes = bytes.lastIndexOf(10) + 1;
   const text = bytes.subarray(0, completeBytes).toString("utf8");
@@ -61,19 +81,38 @@ export class SessionRecorder {
   #seq = 0;
   readonly #redactionContext: RedactionContext;
 
-  constructor(runDirectory: string, options: RedactionOptions = {}) {
-    this.runDirectory = runDirectory;
-    this.path = `${runDirectory}/session/events.jsonl`;
+  private constructor(runDirectory: string, options: RedactionOptions) {
+    this.runDirectory = resolve(runDirectory);
+    this.path = checkedRunPath(runDirectory, "session/events.jsonl", {
+      kind: "file",
+    });
     this.#redactionContext = redactionContext(options);
-    mkdirSync(dirname(this.path), { recursive: true });
-    const existing = readSession(this.path);
-    this.#seq = existing.events.at(-1)?.seq ?? 0;
+  }
+
+  static create(
+    runDirectory: string,
+    options: RedactionOptions = {},
+  ): SessionRecorder {
+    const recorder = new SessionRecorder(runDirectory, options);
+    mkdirSync(dirname(recorder.path), { recursive: true });
+    writeFileSync(recorder.path, "", { flag: "wx", flush: true });
+    return recorder;
+  }
+
+  static open(
+    runDirectory: string,
+    options: RedactionOptions = {},
+  ): SessionRecorder {
+    const recorder = new SessionRecorder(runDirectory, options);
+    const existing = readSession(recorder.path);
+    recorder.#seq = existing.events.at(-1)?.seq ?? 0;
     if (existing.trailingBytes) {
-      truncateSync(this.path, existing.completeBytes);
-      this.record("session.tail.recovered", {
+      truncateSync(recorder.path, existing.completeBytes);
+      recorder.record("session.tail.recovered", {
         discardedBytes: existing.trailingBytes,
       });
     }
+    return recorder;
   }
 
   sanitize<T>(value: T): T {
@@ -81,13 +120,32 @@ export class SessionRecorder {
   }
 
   record(type: string, data: unknown = {}): SessionEvent {
+    return this.append(type, this.sanitize(data));
+  }
+
+  recordRevision(event: RevisionEvent): SessionEvent {
+    return this.append(event.type, {
+      revision: event.revision,
+      markdownSha256: event.markdownSha256,
+      imageSha256: event.imageSha256,
+      ...(event.type === "document.revision.committed"
+        ? { audit: this.sanitize(event.audit) }
+        : { step: event.step }),
+    });
+  }
+
+  private append(type: string, data: unknown): SessionEvent {
     const event = {
       seq: this.#seq + 1,
       time: isoWithOffset(),
       type,
-      data: redactValue(data, "", this.#redactionContext),
+      data,
     };
-    appendFileSync(this.path, `${JSON.stringify(event)}\n`, {
+    const path = checkedRunPath(this.runDirectory, "session/events.jsonl", {
+      kind: "file",
+      allowMissing: false,
+    });
+    appendFileSync(path, `${JSON.stringify(event)}\n`, {
       encoding: "utf8",
       flush: true,
     });

@@ -432,8 +432,8 @@ describe("artifact transaction failures", () => {
       const store = await reviewed();
       const code = `import {RunStore} from ${JSON.stringify(new URL("../src/store.ts", import.meta.url).href)};
       const store=await RunStore.open(process.env.HANDNOTE_TEST_RUN,{mode:"recover"});
-      const record=store.recorder.record.bind(store.recorder);
-      store.recorder.record=(type,data)=>{const event=record(type,data);if(type===${JSON.stringify(stage === "revision" ? "document.revision.committed" : "note.finalized")}) process.exit(23);return event;};
+      const record=store.recorder.recordRevision.bind(store.recorder);
+      store.recorder.recordRevision=(input)=>{const event=record(input);if(input.type===${JSON.stringify(stage === "revision" ? "document.revision.committed" : "note.finalized")}) process.exit(23);return event;};
       ${stage === "revision" ? 'await store.commit({markdown:"Second",audit:{}},{kind:"revise",step:3,width:700});' : "await store.finalize(3);"}`;
       const child = Bun.spawn([process.execPath, "-e", code], {
         env: { ...process.env, HANDNOTE_TEST_RUN: store.directory },
@@ -545,7 +545,7 @@ describe("session and recovery", () => {
     const before = await fs.readFile(store.recorder.path);
     await RunStore.open(store.directory);
     expect(await fs.readFile(store.recorder.path)).toEqual(before);
-    const recorder = new SessionRecorder(store.directory);
+    const recorder = SessionRecorder.open(store.directory);
     expect(recorder.record("after").seq).toBe(count + 2);
     const events = readSession(recorder.path);
     expect(events.trailingBytes).toBe(0);

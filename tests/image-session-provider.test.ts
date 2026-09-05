@@ -456,7 +456,7 @@ describe("session and provider transport", () => {
 
   test("repairs Provider tool arguments before SDK validation and records metadata", async () => {
     const directory = await temporary();
-    const recorder = new SessionRecorder(directory);
+    const recorder = SessionRecorder.create(directory);
     const retrying = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 0 },
       recorder,
@@ -562,7 +562,7 @@ describe("session and provider transport", () => {
       /%[0-9A-F]{2}/g,
       (match) => match.toLowerCase(),
     );
-    const recorder = new SessionRecorder(directory, { secrets: [secret] });
+    const recorder = SessionRecorder.create(directory, { secrets: [secret] });
     const providerError = Object.assign(
       new Error(`Incorrect API key provided: ${secret}`),
       {
@@ -600,7 +600,7 @@ describe("session and provider transport", () => {
 
   test("records monotonic synchronous events", async () => {
     const directory = await temporary();
-    const recorder = new SessionRecorder(directory);
+    const recorder = SessionRecorder.create(directory);
     recorder.record("one", {});
     recorder.record("two", {});
     const events = (await readFile(recorder.path, "utf8"))
@@ -612,7 +612,7 @@ describe("session and provider transport", () => {
 
   test("retries 429 and all 5xx responses but does not retry 401", async () => {
     const directory = await temporary();
-    const recorder = new SessionRecorder(directory);
+    const recorder = SessionRecorder.create(directory);
     const state = new RunState();
     const stats = { retries: 0, attempts: 0 };
     let calls = 0;
@@ -662,7 +662,7 @@ describe("session and provider transport", () => {
 
   test("gives each timed-out attempt its own deadline", async () => {
     const directory = await temporary();
-    const recorder = new SessionRecorder(directory);
+    const recorder = SessionRecorder.create(directory);
     const stats = { retries: 0, attempts: 0 };
     let calls = 0;
     const timingOut = createRetryingFetch(
@@ -692,7 +692,7 @@ describe("session and provider transport", () => {
 
   test("does not transport-retry a body stream after response start", async () => {
     const directory = await temporary();
-    const recorder = new SessionRecorder(directory);
+    const recorder = SessionRecorder.create(directory);
     const stats = { retries: 0, attempts: 0 };
     let calls = 0;
     const retrying = createRetryingFetch(

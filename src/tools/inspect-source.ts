@@ -76,7 +76,7 @@ export function createInspectSourceTool(
         const pending = (async (): Promise<InspectionOutput> => {
           const result = await inspectSource(
             context.sourcePath,
-            `${context.runDirectory}/intermediate/inspections`,
+            context.store.path("intermediate/inspections"),
             normalized,
             sequence,
             context.toolMedia.maxEdge,

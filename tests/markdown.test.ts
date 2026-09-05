@@ -156,6 +156,38 @@ describe("Markdown compilation", () => {
     });
   });
 
+  test("rejects internal symbolic links and non-file figures for all image syntax", async () => {
+    const directory = await temporary();
+    const original = await figureFixture(directory);
+    await symlink(original, `${directory}/assets/figures/link.png`);
+    await symlink(
+      `${directory}/assets/figures`,
+      `${directory}/assets/figures/alias`,
+    );
+    await symlink(
+      `${directory}/assets/figures/missing.png`,
+      `${directory}/assets/figures/dangling.png`,
+    );
+    await mkdir(`${directory}/assets/figures/directory.png`);
+    for (const src of [
+      "../assets/figures/link.png",
+      "../assets/figures/dangling.png",
+      "../assets/figures/directory.png",
+      "../assets/figures/alias/figure-001.png",
+    ])
+      for (const markdown of [
+        `![alt](${src})`,
+        `![alt][ref]\n\n[ref]: ${src}`,
+        `<img src="${src}">`,
+        `<picture><source srcset="${src} 1x"><img src="../assets/figures/figure-001.png"></picture>`,
+      ])
+        await expect(
+          compileNoteMarkdown(markdown, { runDirectory: directory }),
+        ).rejects.toMatchObject({
+          issues: [expect.objectContaining({ code: "invalid_image_path" })],
+        });
+  });
+
   test("uses library math and code conventions with nonblocking KaTeX fallback", async () => {
     const note = await compileNoteMarkdown(
       "$x$\n\n$$\ny^2\n$$\n\n```math\n\\frac{a}{b}\n```\n\n```MATH\nliteral\n```\n\n$\\notACommand{$\n\n```mermaid\nflowchart TD\n A --> B\n```\n\n```Mermaid\nliteral\n```",

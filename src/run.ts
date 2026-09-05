@@ -1,12 +1,13 @@
 import { constants } from "node:fs";
 import { access, readdir, rm } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, relative, resolve } from "node:path";
 import { createAgentRunStats, runAgent } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
 import type { RunResult } from "./manifest.ts";
 import { createModel, type ProviderStats } from "./provider/index.ts";
+import { checkedRunPath } from "./run-path.ts";
 import type { SessionRecorder } from "./session.ts";
 import { RunState } from "./state.ts";
 import { RunStore } from "./store.ts";
@@ -52,7 +53,9 @@ async function cleanupIntermediate(
   runDirectory: string,
   recorder: SessionRecorder,
 ): Promise<void> {
-  const directory = `${runDirectory}/intermediate/inspections`;
+  const directory = checkedRunPath(runDirectory, "intermediate/inspections", {
+    kind: "directory",
+  });
   const collect = async (path: string): Promise<string[]> => {
     const output: string[] = [];
     for (const entry of await readdir(path, { withFileTypes: true }).catch(
@@ -61,7 +64,14 @@ async function cleanupIntermediate(
         throw error;
       },
     )) {
-      const child = `${path}/${entry.name}`;
+      const child = checkedRunPath(
+        runDirectory,
+        relative(runDirectory, `${path}/${entry.name}`),
+        {
+          kind: entry.isDirectory() ? "directory" : "file",
+          allowMissing: false,
+        },
+      );
       if (entry.isDirectory()) output.push(...(await collect(child)));
       else output.push(child);
     }
