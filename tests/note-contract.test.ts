@@ -638,6 +638,116 @@ describe("note tool sequencing", () => {
   });
 });
 
+describe("GFM table audit", () => {
+  const audit = (quote: string, occurrence = 1) => ({
+    uncertainties: [
+      {
+        id: "u1",
+        target: { quote, occurrence },
+        bestGuess: quote,
+        candidates: [quote, "alternative"],
+        basis: "ambiguous source",
+        region: fullRegion,
+        confidence: 0.5,
+      },
+    ],
+  });
+
+  test("discarded table cells cannot supply quotes or extra occurrences", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    const write = tools.write_note.execute;
+    const revise = tools.revise_note.execute;
+    if (!write || !revise) throw new Error("missing note tools");
+    const markdown = "| A |\n| - |\n| B | Hidden |\n| C | B |\n";
+    state.beginModelStep();
+    for (const invalidAudit of [audit("Hidden"), audit("B", 2)]) {
+      expect(
+        await write(
+          { markdown, audit: invalidAudit },
+          {} as Parameters<typeof write>[1],
+        ),
+      ).toMatchObject({ ok: false, error: { code: "invalid_audit" } });
+      expect(state.revision).toBeUndefined();
+      expect(
+        await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+      ).toBe(false);
+    }
+    expect(
+      await write(
+        { markdown, audit: audit("B") },
+        {} as Parameters<typeof write>[1],
+      ),
+    ).toMatchObject({ ok: true, revision: 1 });
+    const committed = state.revision;
+    if (!committed) throw new Error("missing revision");
+    expect(committed.markdown).toBe(markdown);
+    state.beginModelStep();
+    expect(
+      await revise(
+        { markdown, audit: audit("Hidden") },
+        {} as Parameters<typeof revise>[1],
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_audit" } });
+    expect(state.revision).toBe(committed);
+    expect(
+      await readFile(`${directory}/revisions/revision-001.md`, "utf8"),
+    ).toBe(markdown);
+    expect(
+      await Bun.file(`${directory}/revisions/revision-002.md`).exists(),
+    ).toBe(false);
+  });
+
+  test("discarded table media does not shift subsequent math or captions", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    await mkdir(`${directory}/assets/figures`, { recursive: true });
+    await sharp({
+      create: { width: 20, height: 20, channels: 3, background: "white" },
+    })
+      .png()
+      .toFile(`${directory}/assets/figures/figure-001.png`);
+    const markdown = [
+      "| A |",
+      "| - |",
+      "| B | $x$ ![Hidden](assets/figures/figure-001.png) |",
+      "",
+      "Value $y$.",
+      "",
+      "Before ![Inline alt](assets/figures/figure-001.png) after.",
+      "",
+      "![Visible caption](assets/figures/figure-001.png)",
+    ].join("\n");
+    const write = tools.write_note.execute;
+    if (!write) throw new Error("missing write_note");
+    state.beginModelStep();
+    expect(
+      await write(
+        { markdown, audit: audit("Hidden") },
+        {} as Parameters<typeof write>[1],
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_audit" } });
+    expect(state.revision).toBeUndefined();
+    expect(
+      await write(
+        {
+          markdown,
+          audit: {
+            uncertainties: ["Value y.", "Before after.", "Visible caption"].map(
+              (quote, index) => ({
+                ...audit(quote).uncertainties[0],
+                id: `u${index}`,
+              }),
+            ),
+          },
+        },
+        {} as Parameters<typeof write>[1],
+      ),
+    ).toMatchObject({ ok: true, revision: 1 });
+    expect(state.revision?.markdown).toBe(markdown);
+  });
+});
+
 describe("finalize hash binding", () => {
   test("classifies an unreadable revision file as filesystem", async () => {
     const directory = await temporary();

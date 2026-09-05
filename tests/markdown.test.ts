@@ -9,6 +9,7 @@ import {
   noteMarkdownToHtml,
   parseNoteMarkdown,
 } from "../src/markdown.ts";
+import { analyzeMarkdownSemantics } from "../src/markdown-semantics.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -131,6 +132,55 @@ $$
       "```mermaid\nflowchart TD\n```",
     ])
       await parseNoteMarkdown(markdown, { runDirectory });
+  });
+
+  test("discarded table cells do not make an empty document nonempty", async () => {
+    const runDirectory = await temporary();
+    await figureFixture(runDirectory);
+    for (const hidden of [
+      "Hidden",
+      "$x$",
+      "![Hidden](assets/figures/figure-001.png)",
+    ])
+      await expectIssues(`| |\n| - |\n| | ${hidden} |`, runDirectory, [
+        "empty_document",
+      ]);
+  });
+
+  test("table semantics preserve short rows and tables without alignment", async () => {
+    const runDirectory = await temporary();
+    const note = await parseNoteMarkdown(
+      "| A | B |\n| - | - |\n| C | D |\n| E |\n| F | G | Hidden |",
+      { runDirectory },
+    );
+    expect(analyzeMarkdownSemantics(note.tree).blocks).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+    ]);
+    const html = await noteMarkdownToHtml(note, { runDirectory });
+    expect(html).toContain("<td>E</td>\n<td></td>");
+    expect(html).not.toContain("Hidden");
+    const table = note.tree.children[0];
+    if (table?.type !== "table") throw new Error("missing table");
+    delete table.align;
+    expect(analyzeMarkdownSemantics(note.tree).blocks).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "Hidden",
+    ]);
+    expect(await noteMarkdownToHtml(note, { runDirectory })).toContain(
+      "<td>Hidden</td>",
+    );
   });
 
   test("rejects oversized markdown", async () => {

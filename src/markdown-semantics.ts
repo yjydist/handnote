@@ -70,6 +70,13 @@ export function analyzeMarkdownSemantics(
     imageCount: 0,
   };
   const collect = (node: Root | RootContent): void => {
+    if (node.type === "table") {
+      for (const row of node.children) {
+        const cells = row.children.slice(0, node.align?.length);
+        for (const cell of cells) collect(cell);
+      }
+      return;
+    }
     if (
       node.type === "heading" ||
       node.type === "paragraph" ||
