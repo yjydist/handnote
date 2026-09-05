@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { captureFigure, captureFigureInputSchema } from "../image.ts";
@@ -9,6 +10,7 @@ export function createCaptureFigureTool(
   runtime: ToolRuntime,
 ) {
   let figureSequence = 0;
+  let initialSequence: Promise<number> | undefined;
   const captures = new Map<string, Promise<Output>>();
   type Output = {
     ok: true;
@@ -22,7 +24,7 @@ export function createCaptureFigureTool(
   return createTool({
     id: "capture_figure",
     description:
-      "Materialize one source region as a local figure asset for the note. Input: { region: { x, y, width, height } } in normalized EXIF-rotated source coordinates. Returns the relative path (assets/figures/figure-NNN.png) to reference with standard image syntax ![caption](assets/figures/figure-NNN.png). Repeated identical regions are cached and return the same path. Use only for figures whose visual form the note must preserve; recreated diagrams and tables do not need a crop.",
+      "Materialize one source region as a local figure asset for the note. Input: { region: { x, y, width, height } } in normalized EXIF-rotated source coordinates. Returns the relative path (../assets/figures/figure-NNN.png) to reference with standard image syntax ![caption](../assets/figures/figure-NNN.png). Repeated identical regions are cached and return the same path. Use only for figures whose visual form the note must preserve; recreated diagrams and tables do not need a crop.",
     inputSchema: captureFigureInputSchema,
     outputSchema: z.union([
       z.object({
@@ -50,10 +52,27 @@ export function createCaptureFigureTool(
       const cacheHit = Boolean(pending);
       if (!pending) {
         pending = (async (): Promise<Output> => {
-          const sequence = ++figureSequence;
+          initialSequence ??= readdir(
+            context.store.path("assets/figures"),
+          ).then(
+            (names) =>
+              Math.max(
+                0,
+                ...names.map((name) =>
+                  Number(/^figure-(\d+)\.png$/.exec(name)?.[1] ?? 0),
+                ),
+              ),
+            (error) => {
+              if (error.code === "ENOENT") return 0;
+              throw error;
+            },
+          );
+          const initial = await initialSequence;
+          figureSequence = Math.max(figureSequence, initial) + 1;
+          const sequence = figureSequence;
           const result = await captureFigure(
             context.sourcePath,
-            `${context.runDirectory}/assets/figures`,
+            context.store.path("assets/figures"),
             normalized,
             sequence,
           );

@@ -5,7 +5,9 @@ import { safeErrorMetadata } from "./errors.ts";
 import { classifyProviderError, type createModel } from "./provider/index.ts";
 import type { SessionRecorder } from "./session.ts";
 import type { RunState } from "./state.ts";
+import type { RunStore } from "./store.ts";
 import type { createHandnoteTools } from "./tools/index.ts";
+import { accumulateStepUsage, type TokenUsage } from "./usage.ts";
 
 export interface AgentRunResult {
   finishReason: string;
@@ -14,14 +16,7 @@ export interface AgentRunResult {
   text: string;
 }
 
-export interface AgentUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  cachedInputTokens?: number;
-  reasoningTokens?: number;
-  textOutputTokens?: number;
-}
+export type AgentUsage = TokenUsage;
 
 export interface AgentRunStats {
   completedSteps: number;
@@ -30,11 +25,6 @@ export interface AgentRunStats {
 
 export function createAgentRunStats(): AgentRunStats {
   return { completedSteps: 0, usage: {} };
-}
-
-function add(target: AgentUsage, key: keyof AgentUsage, value: unknown): void {
-  if (typeof value !== "number" || !Number.isFinite(value)) return;
-  target[key] = (target[key] ?? 0) + value;
 }
 
 export function accumulateAgentUsage(
@@ -48,23 +38,11 @@ export function accumulateAgentUsage(
   },
 ): void {
   stats.completedSteps++;
-  add(stats.usage, "inputTokens", usage.inputTokens);
-  add(stats.usage, "outputTokens", usage.outputTokens);
-  add(stats.usage, "totalTokens", usage.totalTokens);
-  add(stats.usage, "cachedInputTokens", usage.cachedInputTokens);
-  add(stats.usage, "reasoningTokens", usage.reasoningTokens);
-  if (
-    typeof usage.outputTokens === "number" &&
-    typeof usage.reasoningTokens === "number"
-  )
-    add(
-      stats.usage,
-      "textOutputTokens",
-      Math.max(0, usage.outputTokens - usage.reasoningTokens),
-    );
+  stats.usage = accumulateStepUsage(stats.usage, usage);
 }
 
 export async function runAgent(options: {
+  store?: RunStore;
   config: HandnoteConfig;
   model: ReturnType<typeof createModel>;
   tools: ReturnType<typeof createHandnoteTools>;
@@ -109,7 +87,7 @@ export async function runAgent(options: {
         stopWhen: () =>
           options.state.finalized || Boolean(options.state.fatalError),
         modelSettings: { maxRetries: 0 },
-        onStepFinish: (step) => {
+        onStepFinish: async (step) => {
           accumulateAgentUsage(options.stats, step.usage);
           options.recorder.record("model.step.completed", {
             step: options.state.modelStep,
@@ -118,6 +96,10 @@ export async function runAgent(options: {
             toolResults: step.toolResults,
             usage: step.usage,
             finishReason: step.finishReason,
+          });
+          await options.store?.updateModel({
+            steps: options.state.modelStep,
+            usage: options.stats.usage,
           });
         },
         onError: ({ error }) => {

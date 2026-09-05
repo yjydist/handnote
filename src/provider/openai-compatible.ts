@@ -275,7 +275,7 @@ export function promoteToolMedia(
 
 export const openAiCompatibleAdapter: ProviderAdapter = {
   protocol: "openai-compatible",
-  createModel({ config, recorder, state, stats }) {
+  createModel({ config, recorder, state, stats, store }) {
     const transport = createRetryingFetch(
       config.model,
       recorder,
@@ -283,6 +283,7 @@ export const openAiCompatibleAdapter: ProviderAdapter = {
       stats,
       fetch,
       repairToolArgumentResponse(recorder),
+      store,
     );
     const provider = createOpenAICompatible({
       name: "handnote-provider",

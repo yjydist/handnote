@@ -58,7 +58,7 @@ export function createInspectSourceTool(
           return output;
         }
         if (inspectSequence >= context.maxInspectCalls) {
-          const nextTool = context.state.revision
+          const nextTool = context.store.manifest.currentRevision
             ? "revise_note"
             : "write_note";
           const message = `Inspection budget exhausted after ${context.maxInspectCalls} unique call(s). Do not call inspect_source again. Use the source and existing inspections, then call ${nextTool} now.`;
@@ -76,7 +76,7 @@ export function createInspectSourceTool(
         const pending = (async (): Promise<InspectionOutput> => {
           const result = await inspectSource(
             context.sourcePath,
-            `${context.runDirectory}/intermediate/inspections`,
+            context.store.path("intermediate/inspections"),
             normalized,
             sequence,
             context.toolMedia.maxEdge,

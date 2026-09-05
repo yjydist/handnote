@@ -15,7 +15,7 @@ export function createHandnoteTools(context: ToolContext) {
   return {
     inspect_source: createInspectSourceTool(context, runtime),
     capture_figure: createCaptureFigureTool(context, runtime),
-    read_note: createReadNoteTool(context),
+    read_note: createReadNoteTool(context, runtime),
     write_note: createWriteNoteTool(context, runtime),
     revise_note: createReviseNoteTool(context, runtime),
     review_render: createReviewRenderTool(context, runtime),

@@ -1,5 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { createModelPreviews } from "../image.ts";
+import { NoteStateError } from "../store.ts";
 import type { ToolRuntime } from "./shared.ts";
 import { layoutSummary, remainingSteps, toolError } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
@@ -34,39 +36,33 @@ export function createReviewRenderTool(
         summary: z.string().optional(),
       }),
     ]),
-    execute: async () =>
-      context.state.transaction(async () => {
-        if (context.state.finalized)
-          return {
-            ...toolError(
-              "already_finalized",
-              "The note is already finalized and cannot be reviewed again",
-            ),
-            summary: "Note already finalized",
-          };
-        if (!context.state.revision)
-          return {
-            ...toolError("no_revision", "No revision exists to review"),
-            summary: "No render",
-          };
-        try {
-          const revision = context.state.review();
-          const output = {
-            ok: true as const,
-            revision: revision.number,
-            markdownSha256: revision.markdownSha256,
-            path: revision.render.imagePath,
-            mimeType: "image/png" as const,
-            warnings: revision.render.warnings,
-            structure: revision.render.structure,
-            summary: `Review revision ${revision.number}; ${layoutSummary(revision.render.warnings)}; ${remainingSteps(context)}. If source comparison finds no content issue, call finalize_note in the next model step without another revision.`,
-          };
-          context.recorder.record("render.reviewed", output);
-          return output;
-        } catch (error) {
-          return runtime.fatal(error);
-        }
-      }),
+    execute: async () => {
+      try {
+        const revision = await context.store.review(
+          context.state.modelStep,
+          async (revision) => {
+            await createModelPreviews(
+              context.store.path(revision.image.path),
+              context.toolMedia,
+            );
+          },
+        );
+        return {
+          ok: true as const,
+          revision: revision.number,
+          markdownSha256: revision.markdown.sha256,
+          path: context.store.path(revision.image.path),
+          mimeType: "image/png" as const,
+          warnings: revision.warnings,
+          structure: revision.structure,
+          summary: `Review revision ${revision.number}; ${layoutSummary(revision.warnings)}; ${remainingSteps(context)}. If source comparison finds no content issue, call finalize_note in the next model step without another revision.`,
+        };
+      } catch (error) {
+        if (error instanceof NoteStateError)
+          return toolError(error.code, error.message);
+        return runtime.fatal(error);
+      }
+    },
     toModelOutput: (output) =>
       runtime.mediaOutputWithFatal("review_render", output),
   });

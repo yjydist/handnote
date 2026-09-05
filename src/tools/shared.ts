@@ -1,6 +1,6 @@
 import { asError, HandnoteError } from "../errors.ts";
-import { createModelPreviews, type ModelPreview } from "../image.ts";
-import type { LayoutWarning } from "../renderer.ts";
+import { createModelPreviews } from "../image.ts";
+
 import type { ToolContext } from "./types.ts";
 
 export const toolError = (code: string, message: string) => ({
@@ -13,7 +13,14 @@ export function remainingSteps(context: ToolContext): string {
   return `${remaining} model step(s) remain after this one`;
 }
 
-export function layoutSummary(warnings: LayoutWarning[]): string {
+export function layoutSummary(
+  warnings: ReadonlyArray<{
+    code: string;
+    message: string;
+    blocking: boolean;
+    elementId?: string | undefined;
+  }>,
+): string {
   const blocking = warnings.filter((warning) => warning.blocking);
   if (blocking.length === 0) return "no blocking layout warnings";
   return `${blocking.length} blocking layout warning(s): ${blocking
@@ -38,7 +45,6 @@ export interface ToolRuntime {
 }
 
 export function createToolRuntime(context: ToolContext): ToolRuntime {
-  const modelMedia = new Map<string, Promise<ModelPreview[]>>();
   const fatal = (error: unknown): never => {
     const value =
       error instanceof HandnoteError
@@ -61,14 +67,14 @@ export function createToolRuntime(context: ToolContext): ToolRuntime {
     try {
       if (!output.ok || !output.path)
         return { type: "text", value: output.summary ?? "Tool failed" };
-      const existing = modelMedia.get(output.path);
-      const pending =
-        existing ?? createModelPreviews(output.path, context.toolMedia);
-      if (!existing) modelMedia.set(output.path, pending);
-      const previews = await pending;
+      if (purpose === "review_render") await context.store.readRevision();
+      const previews = await createModelPreviews(
+        output.path,
+        context.toolMedia,
+      );
       context.recorder.record("tool.model_media.prepared", {
         purpose,
-        cacheHit: Boolean(existing),
+        cacheHit: false,
         source: await context.recorder.media(
           output.path,
           output.mimeType ?? "image/png",

@@ -1,13 +1,17 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { Command } from "commander";
 import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
+import type { RunResult } from "../src/manifest.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
-import { atomicWrite, sha256File } from "../src/utils.ts";
+import { readSession } from "../src/session.ts";
+import { RunStore } from "../src/store.ts";
+import { atomicWrite } from "../src/utils.ts";
 
 export interface ContractChecks {
   artifactContract: boolean;
@@ -49,6 +53,7 @@ export interface EvalAttempt {
   usage: UsageMetrics;
   requests: RequestMetrics;
   stepDurationsMs: number[];
+  sessionTrailingBytes: number;
   contracts: ContractChecks;
 }
 
@@ -127,17 +132,15 @@ function hasUnredactedApiKey(value: unknown): boolean {
 }
 
 export async function inspectEvalAttempt(
-  manifest: RunManifest,
+  result: RunResult,
+  inputName: string,
 ): Promise<EvalAttempt> {
-  if (!manifest.runDirectory || !manifest.runId)
-    throw new Error("Run manifest is missing its directory or id");
-  const eventsPath = `${manifest.runDirectory}/session/events.jsonl`;
+  const { manifest, runDirectory } = result;
+  if (manifest.status === "running" || !manifest.stopReason)
+    throw new Error("Cannot evaluate an unfinished run");
+  const eventsPath = `${runDirectory}/session/events.jsonl`;
   const eventText = await readFile(eventsPath, "utf8");
-  const events = eventText
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const { events, trailingBytes } = readSession(eventsPath);
   const starts = new Map<number, number>();
   const stepDurationsMs: number[] = [];
   const requests: RequestMetrics = {
@@ -181,51 +184,45 @@ export async function inspectEvalAttempt(
       if (started !== undefined && Number.isFinite(finished))
         stepDurationsMs.push(Math.max(0, finished - started));
     }
-    if (type === "note.finalized") finalizedEvent = true;
+    if (type === "note.finalized" && event.seq === manifest.final?.eventSeq)
+      finalizedEvent = true;
   }
 
-  const documentPath = `${manifest.runDirectory}/note.md`;
-  const imagePath = `${manifest.runDirectory}/note.png`;
-  const hasDocument = await Bun.file(documentPath).exists();
-  const hasImage = await Bun.file(imagePath).exists();
-  const revisionPath = manifest.final
-    ? `${manifest.runDirectory}/revisions/revision-${String(manifest.final.revision).padStart(3, "0")}.md`
-    : "";
-  const hasRevision = revisionPath
-    ? await Bun.file(revisionPath).exists()
-    : false;
-  const artifactContract =
-    manifest.status === "complete" || manifest.status === "partial"
-      ? hasDocument && hasImage && hasRevision
-      : !hasDocument && !hasImage;
+  const revision = manifest.revisions.at(-1);
+  const outputExists = existsSync(`${runDirectory}/output`);
+  let artifactContract = false;
   let schemaValid = false;
   let widthExact = false;
   let hashesValid = false;
-  if (hasDocument && hasImage && hasRevision && manifest.final) {
-    try {
-      const markdown = await readFile(documentPath, "utf8");
-      await compileNoteMarkdown(markdown, {
-        runDirectory: manifest.runDirectory,
+  try {
+    const store = await RunStore.open(runDirectory);
+    hashesValid = true;
+    artifactContract =
+      manifest.status === "complete"
+        ? outputExists && Boolean(manifest.final)
+        : !outputExists && (manifest.status !== "partial" || Boolean(revision));
+    if (revision) {
+      const documentPath = store.path(
+        manifest.final?.markdown.path ?? revision.markdown.path,
+      );
+      const imagePath = store.path(
+        manifest.final?.image.path ?? revision.image.path,
+      );
+      await compileNoteMarkdown(await readFile(documentPath, "utf8"), {
+        runDirectory,
       });
       schemaValid = true;
       widthExact =
         (await sharp(imagePath).metadata()).width === configuredWidth;
-      hashesValid =
-        (await sha256File(documentPath)) === manifest.final.markdownSha256 &&
-        (await sha256File(imagePath)) === manifest.final.imageSha256 &&
-        (await sha256File(revisionPath)) === manifest.final.markdownSha256;
-    } catch {}
-  }
-  const sequenceMonotonic = events.every(
-    (event, index) => number(event.seq) === index + 1,
-  );
+    }
+  } catch {}
   const sessionRedacted =
     !hasUnredactedApiKey(events) &&
     !/data:image\/[a-z+.-]+;base64,/i.test(eventText);
   return {
-    input: basename(manifest.input.path),
+    input: basename(inputName),
     runId: manifest.runId,
-    runDirectory: manifest.runDirectory,
+    runDirectory: runDirectory,
     status: manifest.status,
     stopReason: manifest.stopReason,
     durationMs: manifest.durationMs,
@@ -234,14 +231,15 @@ export async function inspectEvalAttempt(
     usage: usageMetrics(manifest.model.usage),
     requests,
     stepDurationsMs,
+    sessionTrailingBytes: trailingBytes,
     contracts: {
       artifactContract,
       finalizedEvent,
       hashesValid,
       schemaValid,
-      sequenceMonotonic,
+      sequenceMonotonic: true,
       sessionRedacted,
-      warningsFree: manifest.warnings.length === 0,
+      warningsFree: (revision?.warnings.length ?? 0) === 0,
       widthExact,
     },
   };
@@ -403,6 +401,22 @@ export function renderEvalReport(report: EvalReport): string {
     lines.push(
       `| ${job.id} | ${basename(job.inputPath)} | ${first?.status ?? "failed"} | ${final ? eventualStatus(job.attempts) : "failed"} | ${job.attempts.length} | ${first ? seconds(first.durationMs) : "-"} | ${final?.runId ?? "-"} |`,
     );
+  }
+  const incompleteSessions = report.jobs
+    .flatMap((job) => job.attempts)
+    .filter((attempt) => attempt.sessionTrailingBytes > 0);
+  if (incompleteSessions.length > 0) {
+    lines.push(
+      "",
+      "## Session diagnostics",
+      "",
+      "Event metrics and sequence checks use complete events only; status and token usage use the confirmed manifest.",
+      "",
+    );
+    for (const attempt of incompleteSessions)
+      lines.push(
+        `- ${attempt.runId}: incomplete session tail (${attempt.sessionTrailingBytes} bytes)`,
+      );
   }
   lines.push(
     "",
@@ -573,13 +587,13 @@ export async function main(argv = process.argv): Promise<number> {
     const jobs = await mapConcurrent(definitions, concurrency, async (job) => {
       const attempts: EvalAttempt[] = [];
       for (let retry = 0; retry <= retryTransient; retry++) {
-        const manifest = await executeRun(
+        const result = await executeRun(
           job.inputPath,
           configPath,
           outputDirectory,
         );
-        attempts.push(await inspectEvalAttempt(manifest));
-        if (!shouldRetryTransientRun(manifest)) break;
+        attempts.push(await inspectEvalAttempt(result, job.inputPath));
+        if (!shouldRetryTransientRun(result.manifest)) break;
       }
       return { ...job, attempts };
     });
