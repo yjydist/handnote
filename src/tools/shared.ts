@@ -55,14 +55,9 @@ export function createToolRuntime(context: ToolContext): ToolRuntime {
     context.state.fail(value);
     throw value;
   };
-  const mediaOutputWithFatal = async (
-    purpose: "inspect_source" | "review_render",
-    output: {
-      ok: boolean;
-      path?: string | undefined;
-      mimeType?: string | undefined;
-      summary?: string | undefined;
-    },
+  const mediaOutputWithFatal: ToolRuntime["mediaOutputWithFatal"] = async (
+    purpose,
+    output,
   ) => {
     try {
       if (!output.ok || !output.path)
