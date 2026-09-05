@@ -534,6 +534,105 @@ describe("session and recovery", () => {
     );
   });
 
+  test.each([
+    "missing-step",
+    "non-prefix",
+    "steps",
+    "attempts",
+    "retries",
+    "unknown-is-not-zero",
+  ])(
+    "rejects inconsistent accounting before repairing or cleaning the run: %s",
+    async (scenario) => {
+      const store = await setup();
+      store.recorder.record("model.attempt.started", { step: 1, attempt: 1 });
+      const usage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 };
+      if (scenario !== "missing-step" && scenario !== "unknown-is-not-zero")
+        store.recorder.record("model.step.completed", {
+          step: 1,
+          usage:
+            scenario === "non-prefix"
+              ? { inputTokens: 5, outputTokens: 5, totalTokens: 10 }
+              : usage,
+        });
+      await store.updateModel({
+        steps: scenario === "steps" ? 2 : 1,
+        attempts: scenario === "attempts" ? 2 : 1,
+        retries: scenario === "retries" ? 1 : 0,
+        usage: scenario === "unknown-is-not-zero" ? { inputTokens: 0 } : usage,
+      });
+      if (scenario === "non-prefix") {
+        store.recorder.record("model.attempt.started", { step: 2, attempt: 1 });
+        store.recorder.record("model.step.completed", {
+          step: 2,
+          usage: { inputTokens: 15, outputTokens: 5, totalTokens: 20 },
+        });
+      }
+      const orphan = store.path("intermediate/revisions/.0001.tmp/note.md");
+      await fs.mkdir(store.path("intermediate/revisions/.0001.tmp"), {
+        recursive: true,
+      });
+      await fs.writeFile(orphan, "uncommitted revision");
+      await fs.appendFile(store.recorder.path, '{"seq":');
+      const paths = [store.path("run.json"), store.recorder.path, orphan];
+      const before = await Promise.all(paths.map((path) => fs.readFile(path)));
+      expect((await RunStore.open(store.directory)).manifest).toEqual(
+        store.manifest,
+      );
+      await expect(
+        RunStore.open(store.directory, { mode: "recover" }),
+      ).rejects.toMatchObject({
+        kind: "filesystem",
+        message:
+          "Recorded model accounting does not match any session event prefix",
+      });
+      expect(await Promise.all(paths.map((path) => fs.readFile(path)))).toEqual(
+        before,
+      );
+    },
+  );
+
+  test("replays events after a confirmed accounting prefix without counting them twice", async () => {
+    const store = await setup();
+    const usage = {
+      inputTokens: 10,
+      cachedInputTokens: 4,
+      outputTokens: 6,
+      reasoningTokens: 2,
+      totalTokens: 16,
+    };
+    store.recorder.record("model.attempt.started", { step: 1, attempt: 1 });
+    store.recorder.record("model.step.completed", { step: 1, usage });
+    await store.updateModel({ steps: 1, attempts: 1, usage });
+    store.recorder.record("model.attempt.started", { step: 2, attempt: 1 });
+    store.recorder.record("model.attempt.started", { step: 2, attempt: 2 });
+    store.recorder.record("model.step.completed", { step: 2, usage });
+    const recovered = await RunStore.open(store.directory, { mode: "recover" });
+    expect(recovered.manifest).toMatchObject({
+      status: "failed",
+      stopReason: "interrupted",
+      model: {
+        steps: 2,
+        attempts: 3,
+        retries: 1,
+        usage: {
+          inputTokens: 20,
+          cachedInputTokens: 8,
+          uncachedInputTokens: 12,
+          cacheHitRate: 0.4,
+          outputTokens: 12,
+          reasoningTokens: 4,
+          textOutputTokens: 8,
+          totalTokens: 32,
+        },
+      },
+    });
+    const before = recovered.manifest;
+    expect(
+      (await RunStore.open(store.directory, { mode: "recover" })).manifest,
+    ).toEqual(before);
+  });
+
   test("continues session sequence and repairs only an incomplete last line", async () => {
     const store = await setup();
     store.recorder.record("test", {

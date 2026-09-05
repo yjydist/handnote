@@ -10,6 +10,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { basename, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { revisionDraftSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import {
@@ -99,12 +100,13 @@ export class RunStore {
     const session = readSession(reader.path(manifest.session));
     await reader.verify(manifest, session.events);
     if (options.mode !== "recover") return reader;
+    const model = reconcileModelAccounting(manifest.model, session.events);
     const uncommitted = await reader.uncommittedPaths(manifest);
     const recorder = SessionRecorder.open(reader.directory, options);
     const store = new RunStore(directory, recorder);
     for (const path of uncommitted)
       await rm(store.path(path), { recursive: true, force: true });
-    await store.updateModel(modelFromEvents(session.events));
+    await store.updateModel(model);
     if (manifest.status === "running") await store.finish("interrupted");
     recorder.record("run.recovered", { status: store.manifest.status });
     return store;
@@ -637,13 +639,22 @@ export class RunStore {
   }
 }
 
-function modelFromEvents(events: SessionEvent[]): RunManifest["model"] {
+function reconcileModelAccounting(
+  confirmed: RunManifest["model"],
+  events: SessionEvent[],
+): RunManifest["model"] {
   const model: RunManifest["model"] = {
     steps: 0,
     retries: 0,
     attempts: 0,
     usage: {},
   };
+  const matchesConfirmed = () =>
+    isDeepStrictEqual(
+      { ...model, usage: summarizeUsage(model.usage) },
+      confirmed,
+    );
+  let matched = matchesConfirmed();
   const keys = [
     "inputTokens",
     "outputTokens",
@@ -670,7 +681,13 @@ function modelFromEvents(events: SessionEvent[]): RunManifest["model"] {
           model.usage[key] = (model.usage[key] ?? 0) + value;
       }
     }
+    matched ||= matchesConfirmed();
   }
+  if (!matched)
+    throw new HandnoteError(
+      "Recorded model accounting does not match any session event prefix",
+      "filesystem",
+    );
   model.usage = summarizeUsage(model.usage);
   return model;
 }

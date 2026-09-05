@@ -23,6 +23,8 @@ Build a chronological evidence chain from monotonic event `seq` values. Distingu
 
 For version 1, a missing or empty session log, or one without its initial `run.created` event, is corruption. Preserve the manifest's recorded usage in the diagnosis; missing evidence does not mean zero usage. Recovery validates paths and artifacts before modifying files. Only an incomplete tail after valid events can be repaired. Manifest free text and audit text are redacted, while manifest integrity fields and the hashes in its referenced revision/review/finalize events remain exact; a short credential substring coincidentally appearing in a hash is not itself evidence of a leaked credential.
 
+A valid session log can still lack a model event whose write failed. Compare the manifest's counters and usage with cumulative accounting at each event prefix, distinguishing absent usage fields from zero. A matching prefix permits recovery to incorporate later events once. If no prefix matches, report inconsistent accounting and preserve the confirmed snapshot; writing recovery rejects the run before repairing the tail or removing orphan artifacts, while read-only opening remains available.
+
 Classify the primary cause as one of:
 
 - preflight/configuration;

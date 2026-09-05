@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { HandnoteError } from "../src/errors.ts";
 import { executeRun, validateInput } from "../src/run.ts";
-import { readSession } from "../src/session.ts";
+import { readSession, SessionRecorder } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
 import { sha256File } from "../src/utils.ts";
 import { fullRegion, simpleDraft } from "./helpers.ts";
@@ -95,7 +95,10 @@ function completionMany(
   });
 }
 
-function textCompletion(sequence: number): Response {
+function textCompletion(
+  sequence: number,
+  usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+): Response {
   return Response.json({
     id: `offline-${sequence}`,
     object: "chat.completion",
@@ -108,7 +111,7 @@ function textCompletion(sequence: number): Response {
         finish_reason: "stop",
       },
     ],
-    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    usage,
   });
 }
 
@@ -529,6 +532,76 @@ describe("run controller", () => {
     },
     30000,
   );
+
+  test("preserves saved usage when a completed-step event could not be written", async () => {
+    const directory = await temporary();
+    const server = Bun.serve({
+      port: 0,
+      fetch: () =>
+        textCompletion(1, {
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+        }),
+    });
+    const record = SessionRecorder.prototype.record;
+    let failed = false;
+    const failure = spyOn(
+      SessionRecorder.prototype,
+      "record",
+    ).mockImplementation(function (this: SessionRecorder, type, data) {
+      if (type === "model.step.completed" && !failed) {
+        failed = true;
+        throw Object.assign(new Error("injected session disk full"), {
+          code: "ENOSPC",
+        });
+      }
+      return record.call(this, type, data);
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const result = await executeRun(
+        input,
+        `${directory}/config.yaml`,
+        `${directory}/runs`,
+      );
+      expect(failed).toBe(true);
+      expect(result.exitCode).toBe(1);
+      expect(result.manifest).toMatchObject({
+        status: "failed",
+        model: {
+          steps: 1,
+          attempts: 1,
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        },
+      });
+      const store = await RunStore.open(result.runDirectory);
+      expect(store.manifest.model).toEqual(result.manifest.model);
+      const paths = [
+        store.path("run.json"),
+        store.path("session/events.jsonl"),
+      ];
+      const before = await Promise.all(paths.map((path) => readFile(path)));
+      expect(
+        readSession(store.path("session/events.jsonl")).events.some(
+          (event) => event.type === "model.step.completed",
+        ),
+      ).toBe(false);
+      await expect(
+        RunStore.open(store.directory, { mode: "recover" }),
+      ).rejects.toMatchObject({ kind: "filesystem" });
+      expect(await Promise.all(paths.map((path) => readFile(path)))).toEqual(
+        before,
+      );
+    } finally {
+      failure.mockRestore();
+      server.stop(true);
+    }
+  }, 30000);
 
   test("recognizes PNG, JPEG, and WebP display input", async () => {
     const directory = await temporary();
