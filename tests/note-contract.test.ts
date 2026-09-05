@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { revisionDraftSchema } from "../src/document.ts";
 import { RunState } from "../src/state.ts";
-import type { RunStore } from "../src/store.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
 import { createStoreFixture, fullRegion, simpleMarkdown } from "./helpers.ts";
 
@@ -44,14 +43,7 @@ async function setup(directory: string) {
   return { state, tools, store };
 }
 
-const firstStep = async (
-  directory: string,
-): Promise<{
-  state: RunState;
-  store: RunStore;
-  tools: ReturnType<typeof createHandnoteTools>;
-  context: unknown;
-}> => {
+const prepareFinalizableNote = async (directory: string) => {
   const { state, tools, store } = await setup(directory);
   state.beginModelStep();
   const writeExecute = tools.write_note.execute;
@@ -67,7 +59,7 @@ const firstStep = async (
   if (!reviewExecute) throw new Error("missing review_render");
   await reviewExecute({}, {} as Parameters<typeof reviewExecute>[1]);
   state.beginModelStep();
-  return { state, tools, store, context: undefined };
+  return { state, tools, store };
 };
 
 describe("note tool sequencing", () => {
@@ -195,7 +187,7 @@ describe("note tool sequencing", () => {
 describe("finalize hash binding", () => {
   test("classifies an unreadable revision file as filesystem", async () => {
     const directory = await temporary();
-    const { state, tools } = await firstStep(directory);
+    const { state, tools } = await prepareFinalizableNote(directory);
     await rm(`${directory}/intermediate/revisions/0001/note.md`);
     const finalize = tools.finalize_note.execute;
     if (!finalize) throw new Error("missing finalize_note");
@@ -210,7 +202,7 @@ describe("finalize hash binding", () => {
 
   test("finalize fails fatally when the revision file on disk no longer matches the reviewed hash", async () => {
     const directory = await temporary();
-    const { state, tools } = await firstStep(directory);
+    const { state, tools } = await prepareFinalizableNote(directory);
     const markdownPath = `${directory}/intermediate/revisions/0001/note.md`;
     await writeFile(markdownPath, "tampered after review\n");
     const finalize = tools.finalize_note.execute;
@@ -226,7 +218,7 @@ describe("finalize hash binding", () => {
 
   test("finalize succeeds when the revision file matches and records its hash", async () => {
     const directory = await temporary();
-    const { tools, store } = await firstStep(directory);
+    const { tools, store } = await prepareFinalizableNote(directory);
     const finalize = tools.finalize_note.execute;
     if (!finalize) throw new Error("missing finalize_note");
     const result = await finalize({}, {} as Parameters<typeof finalize>[1]);
@@ -393,7 +385,7 @@ describe("source audit tool contract", () => {
 
   test("validates source locators before rendering and preserves a reviewed revision on failure", async () => {
     const directory = await temporary();
-    const { tools, store } = await firstStep(directory);
+    const { tools, store } = await prepareFinalizableNote(directory);
     const revise = tools.revise_note.execute;
     if (!revise) throw new Error("missing revise_note");
     const revision = store.manifest.revisions.at(-1);
