@@ -118,7 +118,7 @@ async function figureDataUri(
       allowMissing: false,
     });
     const data = await readFile(actual);
-    const assetPath = relative(root, actual);
+    const assetPath = relative(root, actual).split(sep).join("/");
     assets.set(assetPath, { path: assetPath, sha256: sha256(data) });
     return `data:image/png;base64,${data.toString("base64")}`;
   } catch (error) {

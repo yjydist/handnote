@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { compileNoteMarkdown, maxMarkdownLength } from "../src/markdown.ts";
+import { sha256File } from "../src/utils.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -85,6 +86,12 @@ describe("Markdown compilation", () => {
     expect(note.html).not.toContain("<figcaption>alt</figcaption>");
     expect(note.html).not.toContain("onerror");
     expect(note.structure.figures).toBe(4);
+    expect(note.assets).toEqual([
+      {
+        path: "assets/figures/figure-001.png",
+        sha256: await sha256File(path),
+      },
+    ]);
   });
 
   test("validates every HTML picture candidate before inlining srcset", async () => {
