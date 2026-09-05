@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { HandnoteError } from "../src/errors.ts";
+import { createModelPreviews, displayMetadata } from "../src/image.ts";
 import { executeRun, validateInput } from "../src/run.ts";
 import { readSession, SessionRecorder } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
@@ -725,6 +726,53 @@ describe("run controller", () => {
     }
   });
 
+  test("preserves EXIF display orientation and original input bytes during validation", async () => {
+    const directory = await temporary();
+    const path = `${directory}/rotated.jpg`;
+    const original = await sharp({
+      create: { width: 20, height: 10, channels: 3, background: "white" },
+    })
+      .withMetadata({ orientation: 6 })
+      .jpeg()
+      .toBuffer();
+    await writeFile(path, original);
+
+    expect(await validateInput(path)).toMatchObject({ mimeType: "image/jpeg" });
+    expect((await readFile(path)).equals(original)).toBe(true);
+    expect(await displayMetadata(path)).toEqual({
+      width: 10,
+      height: 20,
+      mimeType: "image/jpeg",
+    });
+    expect(
+      await createModelPreviews(path, { maxEdge: 2048, jpegQuality: 85 }),
+    ).toMatchObject([{ width: 10, height: 20 }]);
+  });
+
+  test("rejects truncated image pixels even when the PNG header is readable", async () => {
+    const directory = await temporary();
+    const path = `${directory}/truncated.png`;
+    const original = await sharp({
+      create: { width: 100, height: 60, channels: 3, background: "white" },
+    })
+      .png()
+      .toBuffer();
+    await writeFile(
+      path,
+      original.subarray(0, Math.floor(original.length / 2)),
+    );
+
+    expect(await displayMetadata(path)).toEqual({
+      width: 100,
+      height: 60,
+      mimeType: "image/png",
+    });
+    await expect(validateInput(path)).rejects.toMatchObject({
+      kind: "validation",
+      message: expect.stringContaining("Input is not a readable image"),
+    });
+  });
+
   test("rejects unsupported decoded formats and extension mismatches", async () => {
     const directory = await temporary();
     const mismatch = `${directory}/jpeg-named-png.png`;
@@ -1191,6 +1239,76 @@ describe("run controller", () => {
     expect(stdout.trim().split("\n")).toHaveLength(1);
     expect(await Bun.file(output).exists()).toBe(false);
   });
+
+  test("truncated image CLI preflight creates no output and sends no Provider request", async () => {
+    const directory = await temporary();
+    const output = `${directory}/runs`;
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => {
+        requests++;
+        return Response.json(
+          { error: { message: "invalid image content" } },
+          { status: 400 },
+        );
+      },
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const original = await readFile(input);
+      await writeFile(
+        input,
+        original.subarray(0, Math.floor(original.length / 2)),
+      );
+      const child = Bun.spawn(
+        [
+          "bun",
+          "run",
+          "src/cli.ts",
+          "run",
+          input,
+          "--config",
+          `${directory}/config.yaml`,
+          "--output",
+          output,
+          "--json",
+        ],
+        { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+      );
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      expect(code).toBe(1);
+      expect(stdout.trim().split("\n")).toHaveLength(1);
+      expect({
+        result: JSON.parse(stdout),
+        requests,
+        outputExists: fsSync.existsSync(output),
+      }).toEqual({
+        result: {
+          status: "failed",
+          exitCode: 1,
+          stopReason: "validation",
+          error: {
+            kind: "validation",
+            message: expect.stringContaining("Input is not a readable image"),
+          },
+        },
+        requests: 0,
+        outputExists: false,
+      });
+      expect(stderr).toBe("");
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
 
   test("reports output initialization failures as filesystem errors", async () => {
     const directory = await temporary();

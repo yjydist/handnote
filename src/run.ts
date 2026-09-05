@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { access, readdir, rm } from "node:fs/promises";
 import { basename, extname, relative, resolve } from "node:path";
+import sharp from "sharp";
 import { createAgentRunStats, runAgent } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
@@ -31,6 +32,8 @@ export async function validateInput(
   try {
     await access(path, constants.R_OK);
     metadata = await displayMetadata(path);
+    // A readable header does not establish that the pixel data is complete.
+    await sharp(path, { failOn: "error" }).raw().toBuffer();
   } catch (error) {
     if (error instanceof HandnoteError) throw error;
     throw new HandnoteError(
