@@ -23,7 +23,6 @@ const recorder = store.recorder;
 const tools = createHandnoteTools({
   store,
   sourcePath,
-  runDirectory: directory,
   width: 700,
   maxSteps: 18,
   maxInspectCalls: 3,

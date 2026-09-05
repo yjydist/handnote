@@ -238,7 +238,6 @@ ${figureMarkdown}
     const tools = createHandnoteTools({
       store,
       sourcePath: `${directory}/source.png`,
-      runDirectory: directory,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,

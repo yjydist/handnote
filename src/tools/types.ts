@@ -7,7 +7,6 @@ import type { RunStore } from "../store.ts";
 export interface ToolContext {
   store: RunStore;
   sourcePath: string;
-  runDirectory: string;
   width: number;
   maxSteps: number;
   maxInspectCalls: number;

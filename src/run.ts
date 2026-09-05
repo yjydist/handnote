@@ -137,7 +137,6 @@ export async function executeRun(
       const tools = createHandnoteTools({
         store,
         sourcePath,
-        runDirectory: store.directory,
         width: config.width,
         maxSteps: config.maxSteps,
         maxInspectCalls: config.maxInspectCalls,
