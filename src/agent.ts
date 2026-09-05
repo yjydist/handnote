@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { Agent } from "@mastra/core/agent";
+import { AgentErrorLogger } from "./agent-logger.ts";
 import type { HandnoteConfig } from "./config.ts";
 import { safeErrorMetadata } from "./errors.ts";
 import { classifyProviderError, type createModel } from "./provider/index.ts";
@@ -60,6 +61,7 @@ export async function runAgent(options: {
     tools: options.tools,
     maxRetries: 0,
   });
+  agent.__setLogger(new AgentErrorLogger(options.recorder));
   const source = await readFile(options.sourcePath);
   options.recorder.record("model.run.started", {
     maxSteps: options.config.maxSteps,
