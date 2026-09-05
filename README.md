@@ -48,6 +48,8 @@ handnote run page.jpg --config handnote.yaml --output ./runs --json
 
 Normal mode prints a short terminal status and run path. `--json` writes exactly one result object to stdout; diagnostics remain on stderr. Exit codes are `0` for complete, `2` for a usable partial result, and `1` when there is no artifact or an unrecoverable error.
 
+Agent Provider-error diagnostics retain error classification, HTTP status and model context, redact configured credentials, and omit raw SDK errors and request/response bodies.
+
 Each run directory is named with local time and a sanitized source stem. `run.json` uses `formatVersion: 1` and is created before the model starts. All artifact paths in it are relative to the run directory; the CLI JSON result separately reports the absolute `runDirectory`, `manifestPath`, current revision and available Markdown/PNG paths.
 
 ```text

@@ -1026,50 +1026,91 @@ describe("run controller", () => {
     }
   }, 30_000);
 
-  test("writes a failed manifest and no note after authentication rejection", async () => {
-    const directory = await temporary();
-    const apiKey = "sk-authentication-secret";
-    const server = Bun.serve({
-      port: 0,
-      fetch: () =>
-        Response.json(
-          {
-            error: {
-              message: `invalid API key ${apiKey}`,
-              type: "authentication",
+  test.each([false, true])(
+    "keeps authentication diagnostics safe with JSON mode %s",
+    async (json) => {
+      const directory = await temporary();
+      const apiKey = "sk-authentication-secret";
+      const server = Bun.serve({
+        port: 0,
+        fetch: () =>
+          Response.json(
+            {
+              error: {
+                message: `invalid API key ${apiKey}`,
+                type: "authentication",
+              },
             },
-          },
-          { status: 401 },
-        ),
-    });
-    try {
-      const input = await writeRunInputs(directory, `${server.url}v1`, apiKey);
-      const result = await executeRun(
-        input,
-        `${directory}/config.yaml`,
-        `${directory}/runs`,
-      );
-      expect(result.manifest.status).toBe("failed");
-      expect(result.exitCode).toBe(1);
-      expect(result.manifest.error?.kind).toBe("authentication");
-      expect(await Bun.file(`${result.runDirectory}/run.json`).exists()).toBe(
-        true,
-      );
-      expect(
-        await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
-      ).toBe(false);
-      const session = await readFile(
-        `${result.runDirectory}/session/events.jsonl`,
-        "utf8",
-      );
-      expect(session).not.toContain(apiKey);
-      expect(session).not.toContain("responseBody");
-      expect(session).not.toContain("requestBodyValues");
-      expect(session).toContain('"statusCode":401');
-    } finally {
-      server.stop(true);
-    }
-  });
+            { status: 401 },
+          ),
+      });
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          apiKey,
+        );
+        const child = Bun.spawn(
+          [
+            process.execPath,
+            "run",
+            "src/cli.ts",
+            "run",
+            input,
+            "--config",
+            `${directory}/config.yaml`,
+            "--output",
+            `${directory}/runs`,
+            ...(json ? ["--json"] : []),
+          ],
+          { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+        );
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        expect(code).toBe(1);
+        expect(stdout).not.toContain(apiKey);
+        expect(stderr).not.toContain(apiKey);
+        expect(stderr).not.toContain("responseBody");
+        expect(stderr).not.toContain("requestBodyValues");
+        expect(stderr).toContain("authentication");
+        expect(stderr).toContain("401");
+        expect(stdout.trim().split("\n")).toHaveLength(1);
+        const [runName] = await readdir(`${directory}/runs`);
+        const runDirectory = `${directory}/runs/${runName}`;
+        const manifestText = await readFile(`${runDirectory}/run.json`, "utf8");
+        expect(manifestText).not.toContain(apiKey);
+        expect(JSON.parse(manifestText)).toMatchObject({
+          status: "failed",
+          stopReason: "authentication",
+          error: { kind: "authentication" },
+        });
+        if (json)
+          expect(JSON.parse(stdout)).toMatchObject({
+            status: "failed",
+            exitCode: 1,
+            runDirectory,
+            error: { kind: "authentication" },
+          });
+        else expect(stdout.trim()).toBe(`failed: ${runDirectory}`);
+        expect(await Bun.file(`${runDirectory}/output/note.md`).exists()).toBe(
+          false,
+        );
+        const session = await readFile(
+          `${runDirectory}/session/events.jsonl`,
+          "utf8",
+        );
+        expect(session).not.toContain(apiKey);
+        expect(session).not.toContain("responseBody");
+        expect(session).not.toContain("requestBodyValues");
+        expect(session).toContain('"statusCode":401');
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
 
   test("retains a valid revision as partial after a later authentication failure", async () => {
     const directory = await temporary();
