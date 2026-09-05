@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { safeErrorMetadata } from "../errors.ts";
 import type { SessionRecorder } from "../session.ts";
 import type { RunState } from "../state.ts";
+import type { RunStore } from "../store.ts";
 import { classifyProviderError } from "./classify.ts";
 import { isRetryableStatus, record, retryAfter } from "./primitives.ts";
 import type { ProviderStats, RetryConfig } from "./types.ts";
@@ -47,6 +48,7 @@ export function createRetryingFetch(
     step: number,
     attempt: number,
   ) => Promise<Response> = async (response) => response,
+  store?: RunStore,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   const transport = async (
     input: RequestInfo | URL,
@@ -63,6 +65,11 @@ export function createRetryingFetch(
         step,
         attempt: attempt + 1,
         ...(request ? { request } : {}),
+      });
+      await store?.updateModel({
+        steps: step,
+        retries: stats.retries,
+        attempts: stats.attempts,
       });
       const timeout = AbortSignal.timeout(config.timeoutMs);
       const signal = init?.signal

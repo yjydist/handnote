@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, open, rename } from "node:fs/promises";
+import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, extname } from "node:path";
 
 export async function sha256File(path: string): Promise<string> {
@@ -59,10 +59,13 @@ export async function atomicWrite(
   try {
     await handle.writeFile(value);
     await handle.sync();
-  } finally {
     await handle.close();
+    await rename(temp, path);
+  } catch (error) {
+    await handle.close().catch(() => {});
+    await rm(temp, { force: true });
+    throw error;
   }
-  await rename(temp, path);
 }
 
 export function isoWithOffset(date = new Date()): string {

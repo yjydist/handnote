@@ -22,6 +22,7 @@ import { redact } from "../src/redact.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
+import { createStoreFixture } from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -227,8 +228,10 @@ describe("image inspection", () => {
     })
       .png()
       .toFile(source);
-    const recorder = new SessionRecorder(directory);
+    const store = await createStoreFixture(directory);
+    const recorder = store.recorder;
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,
@@ -313,7 +316,9 @@ describe("image inspection", () => {
       .png()
       .toFile(source);
     const state = new RunState();
+    const store = await createStoreFixture(directory);
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,
@@ -321,7 +326,7 @@ describe("image inspection", () => {
       maxInspectCalls: 1,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
       state,
-      recorder: new SessionRecorder(directory),
+      recorder: store.recorder,
     });
     const execute = tools.inspect_source.execute;
     if (!execute) throw new Error("missing inspect_source execute");
@@ -339,25 +344,9 @@ describe("image inspection", () => {
       error: { code: "inspection_budget_exhausted" },
     });
     if (!before.ok) expect(before.error.message).toContain("write_note");
-    state.commit(
-      "markdown",
-      "hash",
-      { corrections: [], uncertainties: [] },
-      {
-        htmlPath: `${directory}/note.html`,
-        imagePath: `${directory}/note.png`,
-        width: 700,
-        height: 100,
-        warnings: [],
-        structure: {
-          headings: 0,
-          blocks: 0,
-          tables: 0,
-          equations: 0,
-          diagrams: 0,
-          figures: 0,
-        },
-      },
+    await store.commit(
+      { markdown: "正文", audit: {} },
+      { kind: "write", step: 1, width: 700 },
     );
     const after = await execute(
       { regions: [{ x: 0.4, y: 0, width: 0.5, height: 0.5 }] },
@@ -374,8 +363,10 @@ describe("image inspection", () => {
     })
       .png()
       .toFile(source);
-    const recorder = new SessionRecorder(directory);
+    const store = await createStoreFixture(directory);
+    const recorder = store.recorder;
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,

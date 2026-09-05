@@ -6,14 +6,16 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import sharp from "sharp";
-import { emptyRevisionAudit } from "../src/document.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import { isAllowedRenderRequest, renderDocument } from "../src/renderer.ts";
-import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
-import { sha256File } from "../src/utils.ts";
-import { fullRegion, simpleDraft, simpleMarkdown } from "./helpers.ts";
+import {
+  createStoreFixture,
+  fullRegion,
+  simpleDraft,
+  simpleMarkdown,
+} from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -27,25 +29,6 @@ afterEach(async () => {
       .splice(0)
       .map((path) => rm(path, { recursive: true, force: true })),
   );
-});
-
-const fakeRender = (
-  warnings: { code: string; message: string; blocking: boolean }[] = [],
-  imagePath = "b",
-) => ({
-  htmlPath: "a",
-  imagePath,
-  width: 1,
-  height: 1,
-  warnings,
-  structure: {
-    headings: 1,
-    blocks: 1,
-    tables: 0,
-    equations: 0,
-    diagrams: 0,
-    figures: 0,
-  },
 });
 
 describe("renderer", () => {
@@ -64,7 +47,7 @@ describe("renderer", () => {
       })
         .png()
         .toFile(`${directory}/assets/figures/figure-001.png`);
-      return "![原图](assets/figures/figure-001.png)";
+      return "![原图](../assets/figures/figure-001.png)";
     })();
     const markdown = `# 测试笔记
 
@@ -94,7 +77,7 @@ ${figureMarkdown}
     const note = await compileNoteMarkdown(markdown, {
       runDirectory: directory,
     });
-    const result = await renderDocument(note, directory, 1, 900);
+    const result = await renderDocument(note, `${directory}/render-1`, 900);
     expect(result.width).toBe(900);
     expect(result.height).toBeGreaterThan(0);
     expect(await sharp(result.imagePath).metadata()).toMatchObject({
@@ -185,7 +168,7 @@ ${figureMarkdown}
       "## 原文标题\n\n这是正文[^1]。\n\n[^1]: 原文脚注。",
       { runDirectory: directory },
     );
-    const result = await renderDocument(note, directory, 1, 700);
+    const result = await renderDocument(note, `${directory}/render-1`, 700);
     expect(result.warnings).toEqual([]);
     expect((await sharp(result.imagePath).metadata()).width).toBe(700);
 
@@ -240,7 +223,7 @@ ${figureMarkdown}
     const note = await compileNoteMarkdown(simpleMarkdown(), {
       runDirectory,
     });
-    const result = await renderDocument(note, runDirectory, 1, 700);
+    const result = await renderDocument(note, `${runDirectory}/render-1`, 700);
     expect(result.width).toBe(700);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 30_000);
@@ -249,9 +232,11 @@ ${figureMarkdown}
     const directory = await temporary();
     const draft = simpleDraft();
     const markdown = draft.markdown.replace("# 测试笔记\n\n## 第一节\n\n", "");
-    const recorder = new SessionRecorder(directory);
+    const store = await createStoreFixture(directory);
+    const recorder = store.recorder;
     const state = new RunState();
     const tools = createHandnoteTools({
+      store,
       sourcePath: `${directory}/source.png`,
       runDirectory: directory,
       width: 700,
@@ -297,7 +282,9 @@ ${figureMarkdown}
     expect(result).toMatchObject({
       summary: expect.stringContaining("model step(s) remain"),
     });
-    const htmlPath = state.revision?.render.htmlPath;
+    const htmlPath = store.path(
+      store.manifest.revisions.at(-1)?.html.path ?? "missing",
+    );
     if (!htmlPath) throw new Error("missing rendered HTML");
     const html = await readFile(htmlPath, "utf8");
     expect(html).toContain("这是正文。");
@@ -333,7 +320,7 @@ ${figureMarkdown}
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const result = await renderDocument(note, directory, 1, 700);
+    const result = await renderDocument(note, `${directory}/render-1`, 700);
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -359,7 +346,7 @@ ${figureMarkdown}
     note.html += `<iframe src="${probeUrl}"></iframe>`;
     try {
       await expect(
-        renderDocument(note, directory, 1, 700),
+        renderDocument(note, `${directory}/render-1`, 700),
       ).rejects.toMatchObject({
         issues: [expect.objectContaining({ code: "external_resource" })],
       });
@@ -387,144 +374,6 @@ ${figureMarkdown}
   });
 });
 
-describe("finalization state machine", () => {
-  test("requires render, later review, later finalize, and no blocking warnings", () => {
-    const state = new RunState();
-    state.beginModelStep();
-    state.commit(simpleMarkdown(), "hash", emptyRevisionAudit(), fakeRender());
-    expect(state.canFinalize().ok).toBe(false);
-    state.review();
-    expect(state.canFinalize().ok).toBe(false);
-    state.beginModelStep();
-    state.review();
-    expect(state.canFinalize().ok).toBe(false);
-    state.beginModelStep();
-    expect(state.canFinalize().ok).toBe(true);
-  });
-
-  test("mutation clears review eligibility and blocking warnings prevent finalization", () => {
-    const state = new RunState();
-    state.beginModelStep();
-    state.commit(
-      simpleMarkdown(),
-      "hash",
-      emptyRevisionAudit(),
-      fakeRender([{ code: "overflow", message: "bad", blocking: true }]),
-    );
-    state.beginModelStep();
-    state.review();
-    state.beginModelStep();
-    expect(state.canFinalize()).toEqual({
-      ok: false,
-      reason: "Review contains blocking layout warnings",
-    });
-    state.commit(
-      simpleMarkdown(),
-      "hash2",
-      emptyRevisionAudit(),
-      fakeRender([], "d"),
-    );
-    expect(state.canFinalize()).toEqual({
-      ok: false,
-      reason: "Current revision has not been reviewed",
-    });
-  });
-
-  test("serializes concurrent state transactions", async () => {
-    const state = new RunState();
-    const order: number[] = [];
-    await Promise.all([
-      state.transaction(async () => {
-        await Bun.sleep(10);
-        order.push(1);
-      }),
-      state.transaction(async () => {
-        order.push(2);
-      }),
-    ]);
-    expect(order).toEqual([1, 2]);
-  });
-
-  test("keeps finalization and concurrent revisions on the same revision", async () => {
-    const setup = async () => {
-      const directory = await temporary();
-      const state = new RunState();
-      state.beginModelStep();
-      const initialMarkdown = simpleMarkdown();
-      await mkdir(`${directory}/revisions`, { recursive: true });
-      await Bun.write(
-        `${directory}/revisions/revision-001.md`,
-        initialMarkdown,
-      );
-      state.commit(
-        initialMarkdown,
-        await sha256File(`${directory}/revisions/revision-001.md`),
-        emptyRevisionAudit(),
-        fakeRender(),
-      );
-      state.beginModelStep();
-      state.review();
-      state.beginModelStep();
-      const tools = createHandnoteTools({
-        sourcePath: `${directory}/source.png`,
-        runDirectory: directory,
-        width: 700,
-        maxSteps: 18,
-        maxInspectCalls: 3,
-        toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-        state,
-        recorder: new SessionRecorder(directory),
-      });
-      return { state, tools, directory };
-    };
-
-    const reviseFirst = await setup();
-    const reviseFirstContext = {} as Parameters<
-      NonNullable<typeof reviseFirst.tools.revise_note.execute>
-    >[1];
-    const revisionMarkdown = "修订后的正文。\n";
-    const [reviseResult, finalizeAfterRevise] = await Promise.all([
-      reviseFirst.tools.revise_note.execute?.(
-        { markdown: revisionMarkdown, audit: {} },
-        reviseFirstContext,
-      ),
-      reviseFirst.tools.finalize_note.execute?.({}, reviseFirstContext),
-    ]);
-    expect(reviseResult).toMatchObject({ ok: true, revision: 2 });
-    expect(finalizeAfterRevise).toMatchObject({
-      ok: false,
-      error: { code: "not_ready" },
-    });
-    expect(reviseFirst.state.finalized).toBe(false);
-    expect(reviseFirst.state.revision?.number).toBe(2);
-    expect(
-      await Bun.file(
-        `${reviseFirst.directory}/revisions/revision-002.md`,
-      ).exists(),
-    ).toBe(true);
-
-    const finalizeFirst = await setup();
-    const finalizeFirstContext = {} as Parameters<
-      NonNullable<typeof finalizeFirst.tools.finalize_note.execute>
-    >[1];
-    const [finalizeResult, reviseAfterFinalize] = await Promise.all([
-      finalizeFirst.tools.finalize_note.execute?.({}, finalizeFirstContext),
-      finalizeFirst.tools.revise_note.execute?.(
-        { markdown: revisionMarkdown, audit: {} },
-        finalizeFirstContext,
-      ),
-    ]);
-    expect(finalizeResult).toMatchObject({ ok: true, revision: 1 });
-    expect(reviseAfterFinalize).toMatchObject({
-      ok: false,
-      error: { code: "already_finalized" },
-    });
-    expect(finalizeFirst.state.finalized).toBe(true);
-    expect(finalizeFirst.state.finalizedRevision).toBe(1);
-    expect(finalizeFirst.state.revision?.number).toBe(1);
-  }, 60_000);
-});
-
 describe("standard rendering boundaries", () => {
   test("renders local HTML picture candidates without external resources", async () => {
     const runDirectory = await temporary();
@@ -534,12 +383,12 @@ describe("standard rendering boundaries", () => {
     })
       .png()
       .toFile(`${runDirectory}/assets/figures/a.png`);
-    const local = "assets/figures/a.png";
+    const local = "../assets/figures/a.png";
     const note = await compileNoteMarkdown(
       `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
       { runDirectory },
     );
-    const render = await renderDocument(note, runDirectory, 1, 700);
+    const render = await renderDocument(note, `${runDirectory}/render-1`, 700);
     expect(render.warnings).toEqual([]);
     expect((await sharp(render.imagePath).metadata()).width).toBe(700);
   }, 30_000);
@@ -550,14 +399,18 @@ describe("standard rendering boundaries", () => {
       '```mermaid\nflowchart TD\n a["Safe <b>label</b>"]\n click a "https://example.test"\n```',
       { runDirectory },
     );
-    const render = await renderDocument(linked, runDirectory, 1, 700);
+    const render = await renderDocument(
+      linked,
+      `${runDirectory}/render-1`,
+      700,
+    );
     expect(render.warnings).toEqual([]);
     const external = await compileNoteMarkdown(
       '```mermaid\nflowchart TD\n a@{ img: "https://example.test/remote.png", label: "Remote" }\n```',
       { runDirectory },
     );
     await expect(
-      renderDocument(external, runDirectory, 2, 700),
+      renderDocument(external, `${runDirectory}/render-2`, 700),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ code: "external_resource" })],
     });
@@ -568,7 +421,7 @@ describe("standard rendering boundaries", () => {
     const note = await compileNoteMarkdown(`$${"x".repeat(250)}$`, {
       runDirectory: directory,
     });
-    const render = await renderDocument(note, directory, 1, 700);
+    const render = await renderDocument(note, `${directory}/render-1`, 700);
     expect(
       render.warnings.some(
         (warning) => warning.blocking && warning.code.includes("overflow"),
@@ -585,7 +438,7 @@ describe("standard rendering boundaries", () => {
       ),
       { runDirectory: directory },
     );
-    const render = await renderDocument(note, directory, 1, 700);
+    const render = await renderDocument(note, `${directory}/render-1`, 700);
     const metadata = await sharp(render.imagePath).metadata();
     expect(render.height).toBeGreaterThan(12_000);
     expect(metadata.width).toBe(700);

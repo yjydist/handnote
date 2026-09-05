@@ -73,7 +73,7 @@ describe("Markdown compilation", () => {
     const directory = await temporary();
     const path = await figureFixture(directory);
     const markdown =
-      '![Caption](assets/figures/figure-001.png)\n\n![Reference][image]\n\n[image]: assets/figures/figure-001.png\n\n<p><img src="assets/figures/figure-001.png" alt="HTML" onerror="alert(1)"></p>\n\nInline ![alt](assets/figures/figure-001.png) text.';
+      '![Caption](../assets/figures/figure-001.png)\n\n![Reference][image]\n\n[image]: ../assets/figures/figure-001.png\n\n<p><img src="../assets/figures/figure-001.png" alt="HTML" onerror="alert(1)"></p>\n\nInline ![alt](../assets/figures/figure-001.png) text.';
     const note = await compileNoteMarkdown(markdown, {
       runDirectory: directory,
     });
@@ -90,7 +90,7 @@ describe("Markdown compilation", () => {
   test("validates every HTML picture candidate before inlining srcset", async () => {
     const runDirectory = await temporary();
     const path = await figureFixture(runDirectory);
-    const local = "assets/figures/figure-001.png";
+    const local = "../assets/figures/figure-001.png";
     const note = await compileNoteMarkdown(
       `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
       { runDirectory },
@@ -122,7 +122,7 @@ describe("Markdown compilation", () => {
       "https://example.test/image.png",
       "//example.test/image.png",
       "../source.png",
-      "assets/figures/escape.png",
+      "../assets/figures/escape.png",
       "data:image/png;base64,YQ==",
     ]) {
       for (const markdown of [
@@ -138,7 +138,7 @@ describe("Markdown compilation", () => {
       }
     }
     await expect(
-      compileNoteMarkdown("![alt](assets/figures/missing.png)", {
+      compileNoteMarkdown("![alt](../assets/figures/missing.png)", {
         runDirectory: directory,
       }),
     ).rejects.toMatchObject({
@@ -148,7 +148,7 @@ describe("Markdown compilation", () => {
     await mkdir(`${linked}/assets`);
     await symlink(`${outside}/assets/figures`, `${linked}/assets/figures`);
     await expect(
-      compileNoteMarkdown("![alt](assets/figures/figure-001.png)", {
+      compileNoteMarkdown("![alt](../assets/figures/figure-001.png)", {
         runDirectory: linked,
       }),
     ).rejects.toMatchObject({

@@ -48,9 +48,30 @@ handnote run page.jpg --config handnote.yaml --output ./runs --json
 
 Normal mode prints a short terminal status and run path. `--json` writes exactly one result object to stdout; diagnostics remain on stderr. Exit codes are `0` for complete, `2` for a usable partial result, and `1` when there is no artifact or an unrecoverable error.
 
-Each run directory is named with local time and a sanitized source stem. It always retains the byte-identical `original.<ext>`, `run.json`, and `session/events.jsonl`. Only complete or usable partial runs contain root-level `note.md` and `note.png`. For a complete run, `note.md` is the finalized revision's GFM markdown verbatim. For a partial run, it is the latest committed revision verbatim and has not been finalized. Every committed revision is also retained byte-identical under `revisions/revision-NNN.md`, and `assets/figures/` keeps captured source crops, so each revision is independently rebuildable from disk. When intermediate image retention is disabled, inspection images and revision HTML/PNG files are removed after their hashes are recorded; `revisions/` and `assets/` always survive.
+Each run directory is named with local time and a sanitized source stem. `run.json` uses `formatVersion: 1` and is created before the model starts. All artifact paths in it are relative to the run directory; the CLI JSON result separately reports the absolute `runDirectory`, `manifestPath`, current revision and available Markdown/PNG paths.
 
-The note and audit contracts are separate. `write_note` and `revise_note` accept `{markdown,audit}`. Markdown uses standard GFM, including links, footnotes and reference-style images, plus KaTeX math, Mermaid diagrams and sanitized HTML. Scripts and event attributes are removed; images must reference captured files in the current run’s `assets/figures/` and are inlined. External media is not downloaded. Only blank or oversized text is rejected at the syntax boundary; successful compilation does not imply visible or complete content.
+```text
+<run>/
+├── input/original.<ext>
+├── output/                         # only after successful finalize_note
+│   ├── note.md
+│   └── note.png
+├── assets/figures/                 # only when figures are captured
+├── intermediate/
+│   ├── revisions/0001/             # each committed revision is immutable
+│   │   ├── note.md
+│   │   ├── note.html
+│   │   └── note.png
+│   └── inspections/                # optional inspection evidence
+├── session/events.jsonl
+└── run.json
+```
+
+A revision is rendered and hashed in a temporary directory, promoted as a whole, then confirmed by an atomic manifest update. `currentRevision` and `reviewedRevision` are disk state. Finalization rechecks the revision's Markdown, HTML, PNG and referenced assets, copies the reviewed Markdown/PNG unchanged into `output.tmp/`, and promotes the complete directory before committing `status: complete`. A partial run retains its valid revisions and has no `output/`. `saveIntermediateImages: false` removes only inspection images; every committed revision and captured figure survives, including after failures.
+
+`RunStore.open(directory)` validates the manifest, committed files and matching event references without modifying the run. `RunStore.open(directory, {mode: "recover"})` additionally discards unconfirmed temporary/orphan artifacts and recovers an interrupted running run as partial or failed with stop reason `interrupted`. Neither API resumes the model. A run has one writer; tool mutations are serialized. A directory or success-shaped session event without a corresponding manifest reference is not a committed result. Historical, unversioned runs are not migrated and have no path aliases.
+
+The note and audit contracts are separate. `write_note` and `revise_note` accept `{markdown,audit}`. Markdown uses standard GFM, including links, footnotes and reference-style images, plus KaTeX math, Mermaid diagrams and sanitized HTML. Scripts and event attributes are removed; images reference captured files as `../assets/figures/figure-NNN.png`, relative to `output/note.md`, and are inlined. Historical revisions retain the exact same Markdown bytes and use that same document base when compiled by Handnote. External media is not downloaded. Only blank or oversized text is rejected at the syntax boundary; successful compilation does not imply visible or complete content.
 
 Audit `target.quote` locates an exact, case-sensitive Markdown source substring, with an optional 1-based `occurrence` for repeated or overlapping matches. Whitespace and markers are preserved: TeX and image syntax are valid locators. Validation occurs before rendering and does not prove that the quoted content appears in the image. `review_render` is responsible for checking visual fidelity and completeness against the source. Audit candidates, evidence, confidence and correction details remain session-only; corrections require confidence of at least `0.95`. A complete run still requires a later-step review and then `finalize_note`, which re-hashes the on-disk revision and refuses a mismatch. Historical runs retain their original audit contract and are not migrated.
 
@@ -82,9 +103,9 @@ The custom transport retries network failures, timeouts, HTTP 408/409/429, and 5
 
 ## Debug a session
 
-Read `run.json` first, then correlate `model.step.completed`, `model.attempt.*`, document revision, render review, and terminal events by `seq` in `session/events.jsonl`. For a finalized run, read the revision number from `note.finalized`, find the matching `document.revision.committed`, and inspect its `data.audit`. That audit is the authoritative record of uncertainties and conservative corrections for the final visible note. The repository includes the read-only `debug-note-run` skill at `.agents/skills/debug-note-run/SKILL.md`; it classifies failure and content evidence without calling a Provider or changing artifacts.
+Read `run.json` first, then correlate `model.step.completed`, `model.attempt.*`, document revision, render review, and terminal events by `seq` in `session/events.jsonl`. For a finalized run, use `manifest.final.eventSeq` to locate the confirmed `note.finalized` event, then the revision index’s `commitEventSeq` to locate `document.revision.committed` and inspect its `data.audit`. That audit is the authoritative record of uncertainties and conservative corrections for the final visible note. The repository includes the read-only `debug-note-run` skill at `.agents/skills/debug-note-run/SKILL.md`; it classifies failure and content evidence without calling a Provider or changing artifacts.
 
-Session records recursively redact credential-like fields, Authorization values, URL credentials, and Base64 data. Media appears as `{path,mimeType,sha256,retained}` references.
+Session writes are synchronous and flushed; reopening a writer continues the sequence. Recovery truncates only an incomplete last line and records that repair; invalid complete lines or duplicate sequences are errors. Session records recursively redact credential-like fields, Authorization values, URL credentials, and Base64 data. Media appears as `{path,mimeType,sha256,retained}` references.
 
 ## Development
 

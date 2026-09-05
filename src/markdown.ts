@@ -1,5 +1,5 @@
 import { readFile, realpath } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { Element, ElementContent, Root } from "hast";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
@@ -12,7 +12,9 @@ import remarkRehype from "remark-rehype";
 import { parseSrcset, stringifySrcset } from "srcset";
 import { unified } from "unified";
 import { SKIP, visit } from "unist-util-visit";
+import type { Artifact } from "./manifest.ts";
 import type { LayoutWarning } from "./renderer.ts";
+import { sha256 } from "./utils.ts";
 
 export const maxMarkdownLength = 200_000;
 
@@ -46,6 +48,7 @@ export interface NoteStructure {
 }
 
 export interface CompiledNote {
+  assets: Artifact[];
   markdown: string;
   html: string;
   hasTitle: boolean;
@@ -86,6 +89,7 @@ async function figureDataUri(
   src: unknown,
   node: Element,
   runDirectory: string,
+  assets: Map<string, Artifact>,
 ): Promise<string> {
   const fail = (code: string, message: string): never => {
     throw new MarkdownValidationError([
@@ -96,14 +100,14 @@ async function figureDataUri(
       },
     ]);
   };
-  if (typeof src !== "string")
+  if (typeof src !== "string" || isAbsolute(src))
     return fail(
       "invalid_image_path",
       "Images must reference captured files in assets/figures/",
     );
   const root = await realpath(runDirectory);
   const figures = `${resolve(root, "assets/figures")}${sep}`;
-  const path = resolve(root, src);
+  const path = resolve(root, "output", src);
   if (!path.startsWith(figures))
     fail("invalid_image_path", `Image is outside assets/figures/: ${src}`);
   try {
@@ -113,7 +117,10 @@ async function figureDataUri(
         "invalid_image_path",
         `Image resolves outside assets/figures/: ${src}`,
       );
-    return `data:image/png;base64,${(await readFile(actual)).toString("base64")}`;
+    const data = await readFile(actual);
+    const assetPath = relative(root, actual);
+    assets.set(assetPath, { path: assetPath, sha256: sha256(data) });
+    return `data:image/png;base64,${data.toString("base64")}`;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       fail("missing_figure", `Captured figure does not exist: ${src}`);
@@ -205,6 +212,7 @@ export async function compileNoteMarkdown(
     diagrams: 0,
     figures: 0,
   };
+  const assets = new Map<string, Artifact>();
   let hasTitle = false;
   const file = await unified()
     .use(remarkParse)
@@ -233,6 +241,7 @@ export async function compileNoteMarkdown(
               node.properties.src,
               node,
               options.runDirectory,
+              assets,
             );
           if (typeof node.properties.srcSet === "string")
             node.properties.srcSet = stringifySrcset(
@@ -243,6 +252,7 @@ export async function compileNoteMarkdown(
                     candidate.url,
                     node,
                     options.runDirectory,
+                    assets,
                   ),
                 })),
               ),
@@ -270,5 +280,12 @@ export async function compileNoteMarkdown(
       ...(anchor ? { elementId: String(anchor.properties.dataHnId) } : {}),
     };
   });
-  return { markdown, html: String(file), hasTitle, structure, warnings };
+  return {
+    assets: [...assets.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    markdown,
+    html: String(file),
+    hasTitle,
+    structure,
+    warnings,
+  };
 }

@@ -5,6 +5,7 @@ import { safeErrorMetadata } from "./errors.ts";
 import { classifyProviderError, type createModel } from "./provider/index.ts";
 import type { SessionRecorder } from "./session.ts";
 import type { RunState } from "./state.ts";
+import type { RunStore } from "./store.ts";
 import type { createHandnoteTools } from "./tools/index.ts";
 
 export interface AgentRunResult {
@@ -65,6 +66,7 @@ export function accumulateAgentUsage(
 }
 
 export async function runAgent(options: {
+  store?: RunStore;
   config: HandnoteConfig;
   model: ReturnType<typeof createModel>;
   tools: ReturnType<typeof createHandnoteTools>;
@@ -109,7 +111,7 @@ export async function runAgent(options: {
         stopWhen: () =>
           options.state.finalized || Boolean(options.state.fatalError),
         modelSettings: { maxRetries: 0 },
-        onStepFinish: (step) => {
+        onStepFinish: async (step) => {
           accumulateAgentUsage(options.stats, step.usage);
           options.recorder.record("model.step.completed", {
             step: options.state.modelStep,
@@ -118,6 +120,10 @@ export async function runAgent(options: {
             toolResults: step.toolResults,
             usage: step.usage,
             finishReason: step.finishReason,
+          });
+          await options.store?.updateModel({
+            steps: options.state.modelStep,
+            usage: options.stats.usage,
           });
         },
         onError: ({ error }) => {

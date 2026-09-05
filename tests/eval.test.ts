@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import sharp from "sharp";
 import {
   type ContractChecks,
   type EvalAttempt,
@@ -13,9 +12,8 @@ import {
   shouldRetryTransientRun,
   summarizeEvalJobs,
 } from "../scripts/real-eval.ts";
-import type { RunManifest, RunStatus } from "../src/run.ts";
-import { sha256File } from "../src/utils.ts";
-import { simpleMarkdown } from "./helpers.ts";
+import type { RunStatus } from "../src/run.ts";
+import { createStoreFixture, simpleMarkdown } from "./helpers.ts";
 
 const directories: string[] = [];
 
@@ -181,83 +179,46 @@ describe("real evaluation aggregation", () => {
 
   test("audits an offline complete run fixture", async () => {
     const directory = await temporary();
-    await mkdir(`${directory}/session`);
-    await mkdir(`${directory}/revisions`, { recursive: true });
-    const documentPath = `${directory}/note.md`;
-    const revisionPath = `${directory}/revisions/revision-001.md`;
-    const imagePath = `${directory}/note.png`;
-    const markdown = simpleMarkdown();
-    await writeFile(documentPath, markdown);
-    await writeFile(revisionPath, markdown);
-    await sharp({
-      create: { width: 1600, height: 400, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(imagePath);
-    const events = [
-      {
-        seq: 1,
-        time: "2026-08-23T00:00:00.000Z",
-        type: "run.started",
-        data: { config: { model: { apiKey: "[REDACTED]" }, width: 1600 } },
-      },
-      {
-        seq: 2,
-        time: "2026-08-23T00:00:00.010Z",
-        type: "model.attempt.started",
-        data: { step: 1, request: { bytes: 100, imageCount: 1 } },
-      },
-      {
-        seq: 3,
-        time: "2026-08-23T00:00:00.030Z",
-        type: "model.step.completed",
-        data: { step: 1 },
-      },
-      {
-        seq: 4,
-        time: "2026-08-23T00:00:00.040Z",
-        type: "note.finalized",
-        data: { revision: 1 },
-      },
-    ];
+    const store = await createStoreFixture(directory);
+    store.recorder.record("run.started", {
+      config: { width: 1600, model: { apiKey: "[REDACTED]" } },
+    });
+    store.recorder.record("model.attempt.started", {
+      step: 1,
+      attempt: 1,
+      request: { bytes: 100, imageCount: 1 },
+    });
+    store.recorder.record("model.step.completed", { step: 1 });
+    await store.commit(
+      { markdown: simpleMarkdown(), audit: {} },
+      { kind: "write", step: 1, width: 1600 },
+    );
+    await store.review(2, async () => {});
+    await store.finalize(3);
+    const events = (await readFile(store.recorder.path, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    for (const event of events) {
+      if (event.type === "model.attempt.started")
+        event.time = "2026-08-23T00:00:00.010Z";
+      if (event.type === "model.step.completed")
+        event.time = "2026-08-23T00:00:00.030Z";
+    }
     await writeFile(
-      `${directory}/session/events.jsonl`,
+      store.recorder.path,
       `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
     );
-    const manifest: RunManifest = {
-      status: "complete",
-      runId: "offline-complete",
-      startedAt: "2026-08-23T00:00:00.000Z",
-      finishedAt: "2026-08-23T00:00:00.050Z",
-      durationMs: 50,
-      stopReason: "finalized",
-      input: { path: "/data/001.jpg", original: "original.jpg" },
-      final: {
-        markdown: "note.md",
-        image: "note.png",
-        markdownSha256: await sha256File(documentPath),
-        imageSha256: await sha256File(imagePath),
-        revision: 1,
+    const inspected = await inspectEvalAttempt(
+      {
+        manifest: store.manifest,
+        runDirectory: directory,
+        manifestPath: store.path("run.json"),
+        exitCode: 0,
       },
-      model: {
-        steps: 1,
-        retries: 0,
-        attempts: 1,
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-          cachedInputTokens: 8,
-          uncachedInputTokens: 2,
-          reasoningTokens: 3,
-          textOutputTokens: 2,
-        },
-      },
-      warnings: [],
-      runDirectory: directory,
-      exitCode: 0,
-    };
-    const inspected = await inspectEvalAttempt(manifest);
+      "fixture.png",
+    );
+    expect(inspected.input).toBe("fixture.png");
     expect(inspected.contracts).toEqual(allContracts(true));
     expect(inspected.stepDurationsMs).toEqual([20]);
     expect(inspected.requests).toEqual({
@@ -265,6 +226,33 @@ describe("real evaluation aggregation", () => {
       bytes: 100,
       maxBytes: 100,
       maxImages: 1,
+    });
+  });
+
+  test("audits a partial run from its revision without requiring final output", async () => {
+    const directory = await temporary();
+    const store = await createStoreFixture(directory);
+    store.recorder.record("run.started", { config: { width: 700 } });
+    await store.commit(
+      { markdown: simpleMarkdown(), audit: {} },
+      { kind: "write", step: 1, width: 700 },
+    );
+    await store.finish("model_stopped");
+    const result = await inspectEvalAttempt(
+      {
+        manifest: store.manifest,
+        runDirectory: directory,
+        manifestPath: store.path("run.json"),
+        exitCode: 2,
+      },
+      "partial.png",
+    );
+    expect(result.contracts).toMatchObject({
+      artifactContract: true,
+      hashesValid: true,
+      schemaValid: true,
+      widthExact: true,
+      finalizedEvent: false,
     });
   });
 

@@ -58,7 +58,7 @@ export function createInspectSourceTool(
           return output;
         }
         if (inspectSequence >= context.maxInspectCalls) {
-          const nextTool = context.state.revision
+          const nextTool = context.store.manifest.currentRevision
             ? "revise_note"
             : "write_note";
           const message = `Inspection budget exhausted after ${context.maxInspectCalls} unique call(s). Do not call inspect_source again. Use the source and existing inspections, then call ${nextTool} now.`;

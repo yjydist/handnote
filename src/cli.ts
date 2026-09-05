@@ -1,24 +1,50 @@
 #!/usr/bin/env bun
 import { Command, CommanderError } from "commander";
 import { asError, HandnoteError } from "./errors.ts";
-import { executeRun, type RunManifest } from "./run.ts";
+import { executeRun, type RunResult } from "./run.ts";
 
 export interface CliResult {
   status: "complete" | "partial" | "failed";
   exitCode: number;
   runDirectory?: string;
   runId?: string;
+  manifestPath?: string;
+  currentRevision?: number;
+  artifacts?: { markdown: string; image: string };
   stopReason: string;
   error?: { kind: string; message: string };
 }
 
-function publicResult(manifest: RunManifest): CliResult {
+function publicResult(result: RunResult): CliResult {
+  const manifest = result.manifest;
+  if (manifest.status === "running")
+    throw new Error("Run returned without a terminal status");
+  const current = manifest.revisions.at(-1);
   return {
     status: manifest.status,
-    exitCode: manifest.exitCode,
-    ...(manifest.runDirectory ? { runDirectory: manifest.runDirectory } : {}),
-    ...(manifest.runId ? { runId: manifest.runId } : {}),
-    stopReason: manifest.stopReason,
+    exitCode: result.exitCode,
+    runDirectory: result.runDirectory,
+    runId: manifest.runId,
+    manifestPath: result.manifestPath,
+    stopReason: manifest.stopReason ?? "internal_error",
+    ...(manifest.currentRevision
+      ? { currentRevision: manifest.currentRevision }
+      : {}),
+    ...(manifest.final
+      ? {
+          artifacts: {
+            markdown: manifest.final.markdown.path,
+            image: manifest.final.image.path,
+          },
+        }
+      : current
+        ? {
+            artifacts: {
+              markdown: current.markdown.path,
+              image: current.image.path,
+            },
+          }
+        : {}),
     ...(manifest.error ? { error: manifest.error } : {}),
   };
 }

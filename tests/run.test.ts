@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   mkdtemp,
   readdir,
@@ -9,7 +9,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
+import { HandnoteError } from "../src/errors.ts";
 import { executeRun, validateInput } from "../src/run.ts";
+import { RunStore } from "../src/store.ts";
 import { sha256File } from "../src/utils.ts";
 import { fullRegion, simpleDraft } from "./helpers.ts";
 
@@ -127,6 +129,135 @@ async function writeRunInputs(
 }
 
 describe("run controller", () => {
+  test.each(["complete", "partial"] as const)(
+    "retains complete revisions while cleaning inspections for a %s run",
+    async (expected) => {
+      const directory = await temporary();
+      const runs = `${directory}/runs`;
+      const script: Array<[string, unknown]> = [
+        [
+          "inspect_source",
+          { regions: [{ x: 0, y: 0, width: 0.5, height: 0.5 }] },
+        ],
+        ["write_note", simpleDraft()],
+        ...(expected === "complete"
+          ? ([
+              ["review_render", {}],
+              ["finalize_note", {}],
+            ] as Array<[string, unknown]>)
+          : []),
+      ];
+      let requests = 0;
+      const server = Bun.serve({
+        port: 0,
+        fetch: async () => {
+          if (requests === 0) {
+            const name = (await readdir(runs))[0];
+            const manifest = JSON.parse(
+              await readFile(`${runs}/${name}/run.json`, "utf8"),
+            );
+            expect(manifest).toMatchObject({
+              status: "running",
+              formatVersion: 1,
+              input: { path: "input/original.png" },
+            });
+            expect(manifest.input.sha256).toHaveLength(64);
+          }
+          const item = script[requests++];
+          return item
+            ? completion(item[0], item[1], requests)
+            : textCompletion(requests);
+        },
+      });
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          "offline",
+        );
+        const config = await readFile(`${directory}/config.yaml`, "utf8");
+        await writeFile(
+          `${directory}/config.yaml`,
+          `${config}saveIntermediateImages: false\n`,
+        );
+        const result = await executeRun(
+          input,
+          `${directory}/config.yaml`,
+          runs,
+        );
+        expect(result.manifest.status).toBe(expected);
+        const store = await RunStore.open(result.runDirectory);
+        for (const file of ["note.md", "note.html", "note.png"])
+          expect(
+            await Bun.file(
+              store.path(`intermediate/revisions/0001/${file}`),
+            ).exists(),
+          ).toBe(true);
+        expect(
+          await Bun.file(store.path("intermediate/inspections")).exists(),
+        ).toBe(false);
+        expect(await Bun.file(store.path("output/note.md")).exists()).toBe(
+          expected === "complete",
+        );
+        const events = await readFile(
+          store.path("session/events.jsonl"),
+          "utf8",
+        );
+        expect(events).toContain('"type":"media.removed"');
+      } finally {
+        server.stop(true);
+      }
+    },
+    30000,
+  );
+
+  test("keeps committed completion when final accounting cannot be written", async () => {
+    const directory = await temporary();
+    let requests = 0;
+    const script: Array<[string, unknown]> = [
+      ["write_note", simpleDraft()],
+      ["review_render", {}],
+      ["finalize_note", {}],
+    ];
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => {
+        const item = script[requests++];
+        return item
+          ? completion(item[0], item[1], requests)
+          : textCompletion(requests);
+      },
+    });
+    const update = RunStore.prototype.updateModel;
+    const failure = spyOn(RunStore.prototype, "updateModel").mockImplementation(
+      async function (this: RunStore, model) {
+        if (this.manifest.status === "complete")
+          throw new HandnoteError("Final accounting unavailable", "filesystem");
+        return update.call(this, model);
+      },
+    );
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const result = await executeRun(
+        input,
+        `${directory}/config.yaml`,
+        `${directory}/runs`,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.manifest.status).toBe("complete");
+      expect((await RunStore.open(result.runDirectory)).manifest.status).toBe(
+        "complete",
+      );
+    } finally {
+      failure.mockRestore();
+      server.stop(true);
+    }
+  }, 30000);
+
   test("recognizes PNG, JPEG, and WebP display input", async () => {
     const directory = await temporary();
     for (const [format, extension] of [
@@ -233,12 +364,12 @@ describe("run controller", () => {
         `${directory}/config.yaml`,
         `${directory}/runs`,
       );
-      expect(result.status).toBe("complete");
+      expect(result.manifest.status).toBe("complete");
       expect(result.exitCode).toBe(0);
       expect(requests).toBe(4);
-      expect(result.final?.revision).toBe(2);
-      expect(result.model.usage.totalTokens).toBe(60);
-      expect(result.model.usage).toMatchObject({
+      expect(result.manifest.final?.revision).toBe(2);
+      expect(result.manifest.model.usage.totalTokens).toBe(60);
+      expect(result.manifest.model.usage).toMatchObject({
         inputTokens: 40,
         cachedInputTokens: 24,
         uncachedInputTokens: 16,
@@ -264,34 +395,45 @@ describe("run controller", () => {
       );
       const runDirectory = result.runDirectory;
       if (!runDirectory) throw new Error("missing run directory");
-      expect(await sha256File(`${runDirectory}/original.png`)).toBe(inputHash);
-      expect(await Bun.file(`${runDirectory}/note.md`).exists()).toBe(true);
-      expect(await Bun.file(`${runDirectory}/note.png`).exists()).toBe(true);
-      const noteMarkdown = await readFile(`${runDirectory}/note.md`, "utf8");
+      expect(await sha256File(`${runDirectory}/input/original.png`)).toBe(
+        inputHash,
+      );
+      expect(await Bun.file(`${runDirectory}/output/note.md`).exists()).toBe(
+        true,
+      );
+      expect(await Bun.file(`${runDirectory}/output/note.png`).exists()).toBe(
+        true,
+      );
+      const noteMarkdown = await readFile(
+        `${runDirectory}/output/note.md`,
+        "utf8",
+      );
       expect(noteMarkdown).toBe(revised.markdown);
       expect(noteMarkdown).not.toContain("audit");
       expect(noteMarkdown).not.toContain("session-only");
       expect(
-        await Bun.file(`${runDirectory}/revisions/revision-001.md`).exists(),
+        await Bun.file(
+          `${runDirectory}/intermediate/revisions/0001/note.md`,
+        ).exists(),
       ).toBe(true);
       expect(
         (await readFile(
-          `${runDirectory}/revisions/revision-001.md`,
+          `${runDirectory}/intermediate/revisions/0001/note.md`,
           "utf8",
         )) === draft.markdown,
       ).toBe(true);
-      const finalSha = result.final?.markdownSha256;
+      const finalSha = result.manifest.final?.markdown.sha256;
       if (!finalSha) throw new Error("missing final markdown sha");
       expect(
-        await sha256File(`${runDirectory}/revisions/revision-002.md`),
+        await sha256File(`${runDirectory}/intermediate/revisions/0002/note.md`),
       ).toBe(finalSha);
-      expect(await sha256File(`${runDirectory}/note.md`)).toBe(finalSha);
-      expect(await Bun.file(`${runDirectory}/intermediate`).exists()).toBe(
-        false,
-      );
-      expect((await stat(`${runDirectory}/revisions`)).isDirectory()).toBe(
-        true,
-      );
+      expect(await sha256File(`${runDirectory}/output/note.md`)).toBe(finalSha);
+      expect(
+        await Bun.file(`${runDirectory}/intermediate/inspections`).exists(),
+      ).toBe(false);
+      expect(
+        (await stat(`${runDirectory}/intermediate/revisions`)).isDirectory(),
+      ).toBe(true);
       const session = await readFile(
         `${runDirectory}/session/events.jsonl`,
         "utf8",
@@ -331,10 +473,9 @@ describe("run controller", () => {
       );
       expect((await readdir(runDirectory)).sort()).toEqual(
         expect.arrayContaining([
-          "note.md",
-          "note.png",
-          "original.png",
-          "revisions",
+          "input",
+          "output",
+          "intermediate",
           "run.json",
           "session",
         ]),
@@ -384,12 +525,14 @@ describe("run controller", () => {
       );
       const result = await executeRun(input, `${directory}/config.yaml`, runs);
       expect(result).toMatchObject({
-        status: "complete",
-        stopReason: "finalized",
         exitCode: 0,
-        final: { revision: 1 },
+        manifest: {
+          status: "complete",
+          stopReason: "finalized",
+          final: { revision: 1 },
+        },
       });
-      expect(result.error).toBeUndefined();
+      expect(result.manifest.error).toBeUndefined();
       const session = await readFile(
         `${result.runDirectory}/session/events.jsonl`,
         "utf8",
@@ -423,12 +566,12 @@ describe("run controller", () => {
         `${directory}/config.yaml`,
         `${directory}/runs`,
       );
-      expect(result.status).toBe("partial");
+      expect(result.manifest.status).toBe("partial");
       expect(result.exitCode).toBe(2);
-      expect(result.stopReason).toBe("model_stopped");
-      expect(await Bun.file(`${result.runDirectory}/note.png`).exists()).toBe(
-        true,
-      );
+      expect(result.manifest.stopReason).toBe("model_stopped");
+      expect(
+        await Bun.file(`${result.runDirectory}/output/note.png`).exists(),
+      ).toBe(false);
     } finally {
       server.stop(true);
     }
@@ -457,15 +600,15 @@ describe("run controller", () => {
         `${directory}/config.yaml`,
         `${directory}/runs`,
       );
-      expect(result.status).toBe("failed");
+      expect(result.manifest.status).toBe("failed");
       expect(result.exitCode).toBe(1);
-      expect(result.error?.kind).toBe("authentication");
+      expect(result.manifest.error?.kind).toBe("authentication");
       expect(await Bun.file(`${result.runDirectory}/run.json`).exists()).toBe(
         true,
       );
-      expect(await Bun.file(`${result.runDirectory}/note.md`).exists()).toBe(
-        false,
-      );
+      expect(
+        await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
+      ).toBe(false);
       const session = await readFile(
         `${result.runDirectory}/session/events.jsonl`,
         "utf8",
@@ -506,24 +649,25 @@ describe("run controller", () => {
         `${directory}/config.yaml`,
         `${directory}/runs`,
       );
-      expect(result.status).toBe("partial");
+      expect(result.manifest.status).toBe("partial");
       expect(result.exitCode).toBe(2);
-      expect(result.stopReason).toBe("authentication");
-      expect(result.error?.kind).toBe("authentication");
-      expect(result.final?.revision).toBe(1);
-      expect(result.model.usage).toMatchObject({
+      expect(result.manifest.stopReason).toBe("authentication");
+      expect(result.manifest.error?.kind).toBe("authentication");
+      expect(result.manifest.currentRevision).toBe(1);
+      expect(result.manifest.final).toBeUndefined();
+      expect(result.manifest.model.usage).toMatchObject({
         inputTokens: 20,
         outputTokens: 10,
         totalTokens: 30,
         cachedInputTokens: 8,
         uncachedInputTokens: 12,
       });
-      expect(await Bun.file(`${result.runDirectory}/note.md`).exists()).toBe(
-        true,
-      );
-      expect(await Bun.file(`${result.runDirectory}/note.png`).exists()).toBe(
-        true,
-      );
+      expect(
+        await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
+      ).toBe(false);
+      expect(
+        await Bun.file(`${result.runDirectory}/output/note.png`).exists(),
+      ).toBe(false);
     } finally {
       server.stop(true);
     }
