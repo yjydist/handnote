@@ -16,7 +16,7 @@
 
 ## 审计契约
 
-`RevisionAudit` (`src/document.ts:62`) 包含 `corrections` 与 `uncertainties` 两个数组 (默认空), 审计条目 ID 全局唯一. 审计定位用 quote locator: `target = { quote, occurrence? }` (`auditTargetSchema`, `src/document.ts:18`), `quote` (1..500 字符) 必须在折叠空白 (双侧 `\s+` → 单空格并 trim) 后于可见笔记文本中出现至少 `occurrence ?? 1` 次. 无 Mermaid / math / 图片时由 `revisionDraftSchema` 的 `superRefine` 同步强制; 含渲染依赖内容时暂缓到渲染后, 图片采用实际显示的 figcaption 而非 alt 属性, 分别用 Mermaid SVG 中具有有效祖先可见性的标签与去除 TeX annotation 的 KaTeX MathML 语义文本完成最终校验. Mermaid 程序源码、透明 / 隐藏标签与 TeX 命令 / 定界符不属于可见文本; KaTeX 解析失败时实际显示的公式回退文本仍可定位. 失败消息统一为 "Audit {id} quote not found (occurrence N)". 标题定位天然可用 (quote 标题行文本). `correction` 的 `confidence` 门槛为 0.95 (`src/document.ts:37`), `uncertainty` 的 `confidence` 在 `[0,1]` 且需至少 2 个候选 (`src/document.ts:46`).
+`RevisionAudit` (`src/document.ts:62`) 包含 `corrections` 与 `uncertainties` 两个数组 (默认空), 审计条目 ID 全局唯一. 审计定位用 quote locator: `target = { quote, occurrence? }` (`auditTargetSchema`, `src/document.ts:18`), `quote` (1..500 字符) 必须在折叠空白 (双侧 `\s+` → 单空格并 trim) 后于可见笔记文本中出现至少 `occurrence ?? 1` 次. 无 Mermaid / math / 图片时由 `revisionDraftSchema` 的 `superRefine` 同步强制; 含渲染依赖内容时暂缓到渲染后, 图片采用实际显示的 figcaption 而非 alt 属性, 分别用 Mermaid SVG 中具有有效祖先可见性的标签与去除 TeX annotation、phantom 与隐藏 / 完全透明操作数的 KaTeX MathML 语义文本完成最终校验. Mermaid 程序源码、透明 / 隐藏标签与 TeX 命令 / 定界符不属于可见文本; KaTeX 解析失败时实际显示的公式回退文本仍可定位. 失败消息统一为 "Audit {id} quote not found (occurrence N)". 标题定位天然可用 (quote 标题行文本). `correction` 的 `confidence` 门槛为 0.95 (`src/document.ts:37`), `uncertainty` 的 `confidence` 在 `[0,1]` 且需至少 2 个候选 (`src/document.ts:46`).
 
 审计数据仅存在于 session 与 `RevisionDraft`, 渲染管线只消费 markdown, 因此审计不会进入任何渲染产物或 `note.md`.
 

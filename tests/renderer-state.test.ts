@@ -54,6 +54,32 @@ const fakeRender = (
 });
 
 describe("renderer", () => {
+  test("extracts math operands without phantom or transparent descendants", async () => {
+    const directory = await temporary();
+    const cases = [
+      [String.raw`\phantom{x}`, ""],
+      [String.raw`\hphantom{x}`, ""],
+      [String.raw`\vphantom{x}`, ""],
+      [String.raw`\phantom{a+\hphantom{b}+\textcolor{red}{c}}`, ""],
+      [String.raw`a+\phantom{x}+b`, "a++b"],
+      [String.raw`\textcolor{transparent}{x}`, ""],
+      [String.raw`\textcolor{#00000000}{x}`, ""],
+      [String.raw`\textcolor{#00000080}{x}`, "x"],
+      [String.raw`\textcolor{red}{x}`, "x"],
+      [String.raw`\textcolor{transparent}{a\textcolor{red}{b}c}`, "b"],
+      [String.raw`\smash{x}`, "x"],
+      [String.raw`\frac{x^2}{y_1}`, "x2y1"],
+      [String.raw`\notACommand{`, String.raw`\notACommand{`],
+    ] as const;
+    const markdown = cases
+      .flatMap(([formula]) => [`$${formula}$`, `$$\n${formula}\n$$`])
+      .join("\n\n");
+    const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
+    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
+    expect(semanticEvidence.mathTextBlocks).toEqual(
+      cases.flatMap(([, expected]) => [expected, expected]),
+    );
+  }, 30_000);
   test("renders self-contained Chinese HTML, KaTeX fallback, Mermaid, table, and figure", async () => {
     const directory = await temporary();
     const source = `${directory}/source.png`;

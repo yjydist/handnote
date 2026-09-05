@@ -233,6 +233,26 @@ async function screenshotTall(
     const forbiddenMermaidContent = mermaidBlocks.some(
       (block) => block.forbidden,
     );
+    const mathPresentationText = (node: Node): string => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const parent = node.parentElement;
+        if (!parent) return "";
+        const style = getComputedStyle(parent);
+        const transparent = /(?:^rgba\([^)]*,|\/)\s*0(?:\.0+)?%?\s*\)$/.test(
+          style.color,
+        );
+        return style.visibility === "visible" && !transparent
+          ? (node.textContent ?? "")
+          : "";
+      }
+      if (
+        node instanceof Element &&
+        ["mphantom", "annotation", "annotation-xml"].includes(node.localName)
+      )
+        return "";
+      // KaTeX clips its accessible MathML; its box size is not glyph visibility.
+      return Array.from(node.childNodes, mathPresentationText).join("");
+    };
     const mathTextBlocks = Array.from(
       document.querySelectorAll<HTMLElement>(".katex, .katex-error"),
       (element) => {
@@ -242,7 +262,7 @@ async function screenshotTall(
         const presentation = Array.from(semantics?.children ?? []).find(
           (child) => child.tagName.toLowerCase() !== "annotation",
         );
-        return presentation?.textContent ?? "";
+        return presentation ? mathPresentationText(presentation) : "";
       },
     );
     const imageCaptionBlocks = Array.from(document.querySelectorAll("img"))

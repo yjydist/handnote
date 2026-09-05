@@ -303,6 +303,10 @@ describe("note tool sequencing", () => {
       "",
       "Inline $E=mc^2$ tail.",
       "",
+      "Visible $a+\\phantom{hidden}+b$ operands.",
+      "",
+      "$\\smash{x}$",
+      "",
       "$$",
       "\\frac{x}{y}",
       "$$",
@@ -330,6 +334,7 @@ describe("note tool sequencing", () => {
             uncertainty("u2", "\\frac"),
             uncertainty("u3", "E=mc^2"),
             uncertainty("u4", "tail. xy"),
+            uncertainty("u8", "hidden"),
           ],
         },
       },
@@ -341,7 +346,7 @@ describe("note tool sequencing", () => {
     });
     const rejectedMessage = (rejected as { error?: { message?: string } }).error
       ?.message;
-    for (const id of ["u1", "u2", "u3", "u4"])
+    for (const id of ["u1", "u2", "u3", "u4", "u8"])
       expect(rejectedMessage).toContain(`Audit ${id} quote not found`);
     expect(state.revision).toBeUndefined();
     expect(
@@ -356,6 +361,8 @@ describe("note tool sequencing", () => {
             uncertainty("u5", "Inline E=mc2 tail."),
             uncertainty("u6", "xy", 2),
             uncertainty("u7", "\\notACommand{"),
+            uncertainty("u9", "Visible a++b operands."),
+            uncertainty("u10", "x"),
           ],
         },
       },
@@ -366,6 +373,40 @@ describe("note tool sequencing", () => {
     const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
     expect(session).not.toContain("semanticEvidence");
   });
+
+  test("write_note rejects notes containing only hidden math", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    state.beginModelStep();
+    for (const formula of [
+      String.raw`\phantom{x}`,
+      String.raw`\hphantom{x}`,
+      String.raw`\vphantom{x}`,
+      String.raw`\textcolor{transparent}{x}`,
+    ]) {
+      for (const markdown of [`$${formula}$`, `$$\n${formula}\n$$`]) {
+        expect(
+          await execute(
+            { markdown, audit: {} },
+            {} as Parameters<typeof execute>[1],
+          ),
+        ).toMatchObject({
+          ok: false,
+          error: {
+            code: "invalid_markdown",
+            message:
+              "empty_document: Markdown document must contain visible content",
+          },
+        });
+        expect(state.revision).toBeUndefined();
+        expect(
+          await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+        ).toBe(false);
+      }
+    }
+  }, 30_000);
 
   test("write_note matches only rendered image captions across Markdown contexts", async () => {
     const directory = await temporary();
