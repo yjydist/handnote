@@ -433,6 +433,114 @@ ${figureMarkdown}
     });
   }, 30_000);
 
+  test("collects only painted Mermaid text in HTML and SVG labels", async () => {
+    const directory = await temporary();
+    for (const htmlLabels of [true, false]) {
+      const themeCSS = [
+        ".mixed strong {color:red!important;}",
+        '.mixed tspan[font-weight="bold"] {fill:red!important;}',
+        ".zeroFill text,.zeroFill tspan {fill-opacity:0!important;}",
+        ".paintTransparent text,.paintTransparent tspan {fill:transparent!important;}",
+        ".outlined text,.outlined tspan {fill:none!important;stroke:red!important;stroke-width:1px!important;}",
+      ].join(" ");
+      const note = await parseNoteMarkdown(
+        [
+          "```mermaid",
+          `%%{init: ${JSON.stringify({ htmlLabels, themeCSS })}}%%`,
+          "flowchart TD",
+          "a[Hidden]:::transparent",
+          "b[Partial]:::partial",
+          'c["`Hidden **Visible** Hidden`"]:::mixed',
+          "d[ZeroFill]:::zeroFill",
+          "e[TransparentFill]:::paintTransparent",
+          "f[Outlined]:::outlined",
+          "g[Ordinary]",
+          "h[AlphaZero]:::alphaZero",
+          "classDef transparent color:transparent",
+          "classDef partial color:#ff000080",
+          "classDef mixed color:transparent",
+          "classDef alphaZero color:#ff000000",
+          "```",
+        ].join("\n"),
+        { runDirectory: directory },
+      );
+      const { render, semanticEvidence } = await renderDocument(
+        note,
+        directory,
+        htmlLabels ? 1 : 2,
+        1000,
+      );
+      const browser = await chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.goto(pathToFileURL(render.htmlPath).href);
+        await page.waitForFunction(
+          () =>
+            (globalThis as typeof globalThis & { __handnoteReady?: boolean })
+              .__handnoteReady === true,
+        );
+        const styles = await page.evaluate(() => {
+          const paint = (selector: string) => {
+            const element = document.querySelector(selector);
+            if (!element) throw new Error(`Missing label: ${selector}`);
+            const style = getComputedStyle(element);
+            return {
+              color: style.color,
+              fill: style.fill,
+              fillOpacity: style.fillOpacity,
+              stroke: style.stroke,
+              strokeWidth: style.strokeWidth,
+            };
+          };
+          const html = document.querySelector(".transparent foreignObject");
+          const leaf = html ? "p" : ".text-inner-tspan";
+          return {
+            html: Boolean(html),
+            transparent: paint(`.transparent ${leaf}`),
+            partial: paint(`.partial ${leaf}`),
+            visible: paint(
+              html ? ".mixed strong" : '.mixed tspan[font-weight="bold"]',
+            ),
+            zeroFill: paint(`.zeroFill ${leaf}`),
+            transparentFill: paint(`.paintTransparent ${leaf}`),
+            outlined: paint(`.outlined ${leaf}`),
+          };
+        });
+        expect(styles.html).toBe(htmlLabels);
+        const property = htmlLabels ? "color" : "fill";
+        expect(styles.transparent[property]).toBe("rgba(0, 0, 0, 0)");
+        expect(styles.partial[property]).toBe("rgba(255, 0, 0, 0.5)");
+        expect(styles.visible[property]).toBe("rgb(255, 0, 0)");
+        if (!htmlLabels) {
+          expect(styles.zeroFill.fillOpacity).toBe("0");
+          expect(styles.transparentFill.fill).toBe("rgba(0, 0, 0, 0)");
+          expect(styles.outlined).toMatchObject({
+            fill: "none",
+            stroke: "rgb(255, 0, 0)",
+            strokeWidth: "1px",
+          });
+        }
+      } finally {
+        await browser.close();
+      }
+      expect(render.warnings).toEqual([]);
+      expect(
+        semanticEvidence.mermaidTextBlocks[0]?.map((text) => text.trim()),
+      ).toEqual(
+        htmlLabels
+          ? [
+              "Partial",
+              "Visible",
+              "ZeroFill",
+              "TransparentFill",
+              "Outlined",
+              "Ordinary",
+            ]
+          : ["Partial", "Visible", "Outlined", "Ordinary"],
+      );
+    }
+  }, 30_000);
+
   test("reports forbidden content found only in rendered Mermaid output", async () => {
     const directory = await temporary();
     const note = await parseNoteMarkdown(

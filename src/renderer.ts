@@ -164,6 +164,30 @@ async function screenshotTall(
           : rect.width > 0 || rect.height > 0)
       );
     };
+    const hasVisiblePaint = (paint: string): boolean =>
+      paint !== "none" &&
+      paint !== "transparent" &&
+      !/(?:^rgba\([^)]*,|\/)\s*0(?:\.0+)?%?\s*\)$/.test(paint);
+    const mermaidLabelText = (node: Node): string => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const parent = node.parentElement;
+        if (!parent || !effectivelyVisible(parent, true)) return "";
+        const style = getComputedStyle(parent);
+        const painted =
+          parent instanceof SVGElement
+            ? (hasVisiblePaint(style.fill) &&
+                Number.parseFloat(style.fillOpacity) > 0) ||
+              (hasVisiblePaint(style.stroke) &&
+                Number.parseFloat(style.strokeOpacity) > 0 &&
+                Number.parseFloat(style.strokeWidth) > 0)
+            : hasVisiblePaint(
+                style.getPropertyValue("-webkit-text-fill-color") ||
+                  style.color,
+              );
+        return painted ? (node.textContent ?? "") : "";
+      }
+      return Array.from(node.childNodes, mermaidLabelText).join("");
+    };
     const mermaidBlocks = Array.from(
       document.querySelectorAll("pre.mermaid"),
       (block) => {
@@ -182,7 +206,7 @@ async function screenshotTall(
               .map((element) => {
                 const rect = element.getBoundingClientRect();
                 return {
-                  text: element.textContent ?? "",
+                  text: mermaidLabelText(element),
                   top: rect.top,
                   left: rect.left,
                 };

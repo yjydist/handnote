@@ -314,6 +314,71 @@ describe("note tool sequencing", () => {
     expect(session).not.toContain("semanticEvidence");
   });
 
+  test("transparent Mermaid labels cannot supply audit quotes or occurrences", async () => {
+    for (const htmlLabels of [true, false]) {
+      const directory = await temporary();
+      const { state, tools } = await setup(directory);
+      const write = tools.write_note.execute;
+      const revise = tools.revise_note.execute;
+      if (!write || !revise) throw new Error("missing note tools");
+      const markdown = [
+        "```mermaid",
+        `%%{init: ${JSON.stringify({ htmlLabels })}}%%`,
+        "flowchart TD",
+        "a[Hidden]:::transparent",
+        "b[Visible]",
+        "c[Visible]:::transparent",
+        "classDef transparent color:transparent",
+        "```",
+      ].join("\n");
+      const audit = (quote: string, occurrence = 1) => ({
+        uncertainties: [
+          {
+            id: "u1",
+            target: { quote, occurrence },
+            bestGuess: quote,
+            candidates: [quote, "alternative"],
+            basis: "ambiguous source",
+            region: fullRegion,
+            confidence: 0.5,
+          },
+        ],
+      });
+      state.beginModelStep();
+      for (const invalidAudit of [audit("Hidden"), audit("Visible", 2)]) {
+        expect(
+          await write(
+            { markdown, audit: invalidAudit },
+            {} as Parameters<typeof write>[1],
+          ),
+        ).toMatchObject({ ok: false, error: { code: "invalid_audit" } });
+        expect(state.revision).toBeUndefined();
+      }
+      expect(
+        await write(
+          { markdown, audit: audit("Visible") },
+          {} as Parameters<typeof write>[1],
+        ),
+      ).toMatchObject({ ok: true, revision: 1 });
+      const committed = state.revision;
+      if (!committed) throw new Error("missing revision");
+      state.beginModelStep();
+      expect(
+        await revise(
+          { markdown, audit: audit("Hidden") },
+          {} as Parameters<typeof revise>[1],
+        ),
+      ).toMatchObject({ ok: false, error: { code: "invalid_audit" } });
+      expect(state.revision).toBe(committed);
+      expect(
+        await readFile(`${directory}/revisions/revision-001.md`, "utf8"),
+      ).toBe(markdown);
+      expect(
+        await Bun.file(`${directory}/revisions/revision-002.md`).exists(),
+      ).toBe(false);
+    }
+  }, 30_000);
+
   test("Mermaid math does not shift subsequent body audit targets", async () => {
     const directory = await temporary();
     const { state, tools } = await setup(directory);
