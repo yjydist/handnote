@@ -34,7 +34,6 @@ describe("capture_figure tool", () => {
     const tools = createHandnoteTools({
       store,
       sourcePath: source,
-      runDirectory: directory,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
@@ -99,7 +98,6 @@ describe("capture_figure tool", () => {
     const tools = createHandnoteTools({
       store,
       sourcePath: source,
-      runDirectory: directory,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
@@ -126,7 +124,6 @@ describe("capture_figure tool", () => {
     const tools = createHandnoteTools({
       store,
       sourcePath: source,
-      runDirectory: directory,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,

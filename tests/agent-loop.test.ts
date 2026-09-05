@@ -40,7 +40,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   const tools = createHandnoteTools({
     store,
     sourcePath,
-    runDirectory: directory,
     width: 700,
     maxSteps: 18,
     maxInspectCalls: 3,

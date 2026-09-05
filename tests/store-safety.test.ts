@@ -37,7 +37,6 @@ describe("recovery path safety", () => {
       const tools = createHandnoteTools({
         store,
         sourcePath: store.path("input/original.png"),
-        runDirectory: store.directory,
         width: 700,
         maxSteps: 8,
         maxInspectCalls: 3,

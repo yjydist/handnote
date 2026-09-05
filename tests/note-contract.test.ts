@@ -34,7 +34,6 @@ async function setup(directory: string) {
   const tools = createHandnoteTools({
     store,
     sourcePath: source,
-    runDirectory: directory,
     width: 700,
     maxSteps: 18,
     maxInspectCalls: 3,
