@@ -207,13 +207,5 @@ export function summarizeUsage(
             : {}),
         }
       : {}),
-    ...(usage.outputTokens !== undefined && usage.reasoningTokens !== undefined
-      ? {
-          textOutputTokens: Math.max(
-            0,
-            usage.outputTokens - usage.reasoningTokens,
-          ),
-        }
-      : {}),
   };
 }

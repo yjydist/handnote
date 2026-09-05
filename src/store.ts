@@ -25,6 +25,7 @@ import type { RedactionOptions } from "./redact.ts";
 import { renderDocument } from "./renderer.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { readSession, type SessionEvent, SessionRecorder } from "./session.ts";
+import { accumulateStepUsage } from "./usage.ts";
 import { atomicWrite, isoWithOffset, sha256 } from "./utils.ts";
 
 export class NoteStateError extends Error {
@@ -655,13 +656,6 @@ function reconcileModelAccounting(
       confirmed,
     );
   let matched = matchesConfirmed();
-  const keys = [
-    "inputTokens",
-    "outputTokens",
-    "totalTokens",
-    "cachedInputTokens",
-    "reasoningTokens",
-  ] as const;
   for (const event of events) {
     const data = event.data as {
       step?: number;
@@ -675,11 +669,7 @@ function reconcileModelAccounting(
     }
     if (event.type === "model.step.completed") {
       model.steps = Math.max(model.steps, data?.step ?? 0);
-      for (const key of keys) {
-        const value = data?.usage?.[key];
-        if (typeof value === "number" && Number.isFinite(value))
-          model.usage[key] = (model.usage[key] ?? 0) + value;
-      }
+      model.usage = accumulateStepUsage(model.usage, data?.usage ?? {});
     }
     matched ||= matchesConfirmed();
   }

@@ -5,6 +5,11 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import sharp from "sharp";
+import {
+  type AgentUsage,
+  accumulateAgentUsage,
+  createAgentRunStats,
+} from "../src/agent.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import * as renderer from "../src/renderer.ts";
 import { readSession, SessionRecorder } from "../src/session.ts";
@@ -498,6 +503,129 @@ describe("artifact transaction failures", () => {
 });
 
 describe("session and recovery", () => {
+  test.each([
+    {
+      name: "partially missing reasoning",
+      steps: [{ outputTokens: 10, reasoningTokens: 4 }, { outputTokens: 8 }],
+      expected: { outputTokens: 18, reasoningTokens: 4, textOutputTokens: 6 },
+    },
+    {
+      name: "entirely missing reasoning",
+      steps: [{ outputTokens: 10 }, { outputTokens: 8 }],
+      expected: { outputTokens: 18 },
+    },
+    {
+      name: "fields from different steps",
+      steps: [{ outputTokens: 10 }, { reasoningTokens: 4 }],
+      expected: { outputTokens: 10, reasoningTokens: 4 },
+    },
+    {
+      name: "explicit zero reasoning",
+      steps: [{ outputTokens: 10, reasoningTokens: 0 }, { outputTokens: 8 }],
+      expected: { outputTokens: 18, reasoningTokens: 0, textOutputTokens: 10 },
+    },
+    {
+      name: "explicit zero text output",
+      steps: [{ outputTokens: 0, reasoningTokens: 0 }, { outputTokens: 8 }],
+      expected: { outputTokens: 8, reasoningTokens: 0, textOutputTokens: 0 },
+    },
+    { name: "entirely missing usage", steps: [{}, {}], expected: {} },
+  ] satisfies Array<{
+    name: string;
+    steps: AgentUsage[];
+    expected: AgentUsage;
+  }>)(
+    "preserves per-step usage through persistence and recovery: $name",
+    async ({ steps, expected }) => {
+      const store = await setup();
+      const stats = createAgentRunStats();
+      for (const [index, usage] of steps.entries()) {
+        const step = index + 1;
+        store.recorder.record("model.attempt.started", { step, attempt: 1 });
+        store.recorder.record("model.step.completed", { step, usage });
+        accumulateAgentUsage(stats, usage);
+        await store.updateModel({
+          steps: step,
+          attempts: step,
+          usage: stats.usage,
+        });
+        expect(store.manifest.model.usage).toEqual(stats.usage);
+      }
+      expect(store.manifest.model.usage).toEqual(expected);
+      await store.finish("model_stopped_no_revision");
+      expect(
+        (await RunStore.open(store.directory)).manifest.model.usage,
+      ).toEqual(expected);
+      const recovered = await RunStore.open(store.directory, {
+        mode: "recover",
+      });
+      expect(recovered.manifest.model.usage).toEqual(expected);
+      const nextStep = steps.length + 1;
+      recovered.recorder.record("model.attempt.started", {
+        step: nextStep,
+        attempt: 1,
+      });
+      recovered.recorder.record("model.step.completed", {
+        step: nextStep,
+        usage: { outputTokens: 3, reasoningTokens: 1 },
+      });
+      const replayed = await RunStore.open(store.directory, {
+        mode: "recover",
+      });
+      expect(replayed.manifest.model).toEqual({
+        steps: nextStep,
+        attempts: nextStep,
+        retries: 0,
+        usage: {
+          outputTokens: (expected.outputTokens ?? 0) + 3,
+          reasoningTokens: (expected.reasoningTokens ?? 0) + 1,
+          textOutputTokens: (expected.textOutputTokens ?? 0) + 2,
+        },
+      });
+      expect(
+        (await RunStore.open(store.directory, { mode: "recover" })).manifest,
+      ).toEqual(replayed.manifest);
+    },
+  );
+
+  test("rejects legacy aggregate text totals before changing recovery evidence", async () => {
+    const store = await setup();
+    for (const [index, usage] of [
+      { outputTokens: 10, reasoningTokens: 4 },
+      { outputTokens: 8 },
+    ].entries()) {
+      const step = index + 1;
+      store.recorder.record("model.attempt.started", { step, attempt: 1 });
+      store.recorder.record("model.step.completed", { step, usage });
+    }
+    await store.updateModel({
+      steps: 2,
+      attempts: 2,
+      usage: { outputTokens: 18, reasoningTokens: 4, textOutputTokens: 14 },
+    });
+    const orphan = store.path("intermediate/revisions/.0001.tmp/note.md");
+    await fs.mkdir(store.path("intermediate/revisions/.0001.tmp"), {
+      recursive: true,
+    });
+    await fs.writeFile(orphan, "uncommitted");
+    await fs.appendFile(store.recorder.path, '{"seq":');
+    const paths = [store.path("run.json"), store.recorder.path, orphan];
+    const before = await Promise.all(paths.map((path) => fs.readFile(path)));
+    expect((await RunStore.open(store.directory)).manifest).toEqual(
+      store.manifest,
+    );
+    await expect(
+      RunStore.open(store.directory, { mode: "recover" }),
+    ).rejects.toMatchObject({
+      kind: "filesystem",
+      message:
+        "Recorded model accounting does not match any session event prefix",
+    });
+    expect(await Promise.all(paths.map((path) => fs.readFile(path)))).toEqual(
+      before,
+    );
+  });
+
   test.each(["before", "partial", "flushed"] as const)(
     "stops a recorder after an append failure until it is reopened: %s",
     async (stage) => {
@@ -792,7 +920,11 @@ describe("session and recovery", () => {
     };
     store.recorder.record("model.attempt.started", { step: 1, attempt: 1 });
     store.recorder.record("model.step.completed", { step: 1, usage });
-    await store.updateModel({ steps: 1, attempts: 1, usage });
+    await store.updateModel({
+      steps: 1,
+      attempts: 1,
+      usage: { ...usage, textOutputTokens: 4 },
+    });
     store.recorder.record("model.attempt.started", { step: 2, attempt: 1 });
     store.recorder.record("model.attempt.started", { step: 2, attempt: 2 });
     store.recorder.record("model.step.completed", { step: 2, usage });
