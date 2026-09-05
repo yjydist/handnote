@@ -179,6 +179,60 @@ ${figureMarkdown}
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 60_000);
 
+  test("visually hides the footnote heading while preserving accessible footnotes", async () => {
+    const directory = await temporary();
+    const note = await compileNoteMarkdown(
+      "## 原文标题\n\n这是正文[^1]。\n\n[^1]: 原文脚注。",
+      { runDirectory: directory },
+    );
+    const result = await renderDocument(note, directory, 1, 700);
+    expect(result.warnings).toEqual([]);
+    expect((await sharp(result.imagePath).metadata()).width).toBe(700);
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({
+        viewport: { width: 700, height: 900 },
+      });
+      await page.goto(pathToFileURL(result.htmlPath).href);
+      await page.waitForFunction(
+        () =>
+          (globalThis as typeof globalThis & { __handnoteReady?: boolean })
+            .__handnoteReady === true,
+      );
+      expect(
+        await page.getByRole("heading", { name: "原文标题" }).isVisible(),
+      ).toBe(true);
+      expect(
+        await page.getByText("原文脚注。", { exact: false }).isVisible(),
+      ).toBe(true);
+      const footnoteHeading = page.locator("[data-footnotes] h2");
+      expect(await footnoteHeading.textContent()).toBe("Footnotes");
+      expect(await page.locator("main").ariaSnapshot()).toContain(
+        'heading "Footnotes" [level=2]',
+      );
+      const links = await page
+        .locator("[data-footnote-ref], [data-footnote-backref]")
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const href = element.getAttribute("href") ?? "";
+            return Boolean(
+              href.startsWith("#") &&
+                document.getElementById(decodeURIComponent(href.slice(1))),
+            );
+          }),
+        );
+      expect(links).toEqual([true, true]);
+
+      const before = await page.screenshot({ fullPage: true });
+      await footnoteHeading.evaluate((element) => element.remove());
+      const after = await page.screenshot({ fullPage: true });
+      expect(before.equals(after)).toBe(true);
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
+
   test("renders from a run directory containing URL fragment characters", async () => {
     const root = await temporary();
     const runDirectory = `${root}/output#fragment`;
