@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -340,17 +340,31 @@ describe("real evaluation aggregation", () => {
   test("refuses to create output without explicit live confirmation", async () => {
     const directory = await temporary();
     const output = `${directory}/runs`;
-    const exitCode = await main([
-      "bun",
-      "real-eval",
-      "--config",
-      `${directory}/missing.yaml`,
-      "--data",
-      `${directory}/missing-data`,
-      "--output",
-      output,
-    ]);
-    expect(exitCode).toBe(1);
-    expect(existsSync(output)).toBe(false);
+    let stderr = "";
+    const stderrWrite = spyOn(process.stderr, "write").mockImplementation(
+      (chunk) => {
+        stderr += String(chunk);
+        return true;
+      },
+    );
+    try {
+      const exitCode = await main([
+        "bun",
+        "real-eval",
+        "--config",
+        `${directory}/missing.yaml`,
+        "--data",
+        `${directory}/missing-data`,
+        "--output",
+        output,
+      ]);
+      expect(exitCode).toBe(1);
+      expect(existsSync(output)).toBe(false);
+      expect(stderr).toBe(
+        "failed: Refusing live evaluation without --confirm-live\n",
+      );
+    } finally {
+      stderrWrite.mockRestore();
+    }
   });
 });
