@@ -11,10 +11,9 @@ import {
 } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
 import type { createModel } from "../src/provider/index.ts";
-import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
-import { simpleDraft } from "./helpers.ts";
+import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -69,8 +68,10 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     .png()
     .toFile(sourcePath);
   const state = new RunState();
-  const recorder = new SessionRecorder(directory);
+  const store = await createStoreFixture(directory);
+  const recorder = store.recorder;
   const tools = createHandnoteTools({
+    store,
     sourcePath,
     runDirectory: directory,
     width: 700,
@@ -165,8 +166,10 @@ test("records a redacted stream error with its model step", async () => {
     .png()
     .toFile(sourcePath);
   const state = new RunState();
-  const recorder = new SessionRecorder(directory);
+  const store = await createStoreFixture(directory);
+  const recorder = store.recorder;
   const tools = createHandnoteTools({
+    store,
     sourcePath,
     runDirectory: directory,
     width: 700,

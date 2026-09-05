@@ -1,9 +1,9 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { layoutSummary, toolError } from "./shared.ts";
+import { layoutSummary, type ToolRuntime, toolError } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
-export function createReadNoteTool(context: ToolContext) {
+export function createReadNoteTool(context: ToolContext, runtime: ToolRuntime) {
   return createTool({
     id: "read_note",
     description:
@@ -27,16 +27,20 @@ export function createReadNoteTool(context: ToolContext) {
       }),
     ]),
     execute: async () => {
-      const revision = context.state.revision;
-      if (!revision)
-        return toolError("no_revision", "No revision exists; use write_note");
-      return {
-        ok: true as const,
-        revision: revision.number,
-        markdown: revision.markdown,
-        markdownSha256: revision.markdownSha256,
-        summary: `Revision ${revision.number} (${revision.markdown.length} characters); ${layoutSummary(revision.render.warnings)}`,
-      };
+      try {
+        const revision = await context.store.readRevision();
+        if (!revision)
+          return toolError("no_revision", "No revision exists; use write_note");
+        return {
+          ok: true as const,
+          revision: revision.number,
+          markdown: revision.text,
+          markdownSha256: revision.markdown.sha256,
+          summary: `Revision ${revision.number} (${revision.text.length} characters); ${layoutSummary(revision.warnings)}`,
+        };
+      } catch (error) {
+        return runtime.fatal(error);
+      }
     },
   });
 }

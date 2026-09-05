@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { compileNoteMarkdown, maxMarkdownLength } from "../src/markdown.ts";
+import { sha256File } from "../src/utils.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -73,7 +74,7 @@ describe("Markdown compilation", () => {
     const directory = await temporary();
     const path = await figureFixture(directory);
     const markdown =
-      '![Caption](assets/figures/figure-001.png)\n\n![Reference][image]\n\n[image]: assets/figures/figure-001.png\n\n<p><img src="assets/figures/figure-001.png" alt="HTML" onerror="alert(1)"></p>\n\nInline ![alt](assets/figures/figure-001.png) text.';
+      '![Caption](../assets/figures/figure-001.png)\n\n![Reference][image]\n\n[image]: ../assets/figures/figure-001.png\n\n<p><img src="../assets/figures/figure-001.png" alt="HTML" onerror="alert(1)"></p>\n\nInline ![alt](../assets/figures/figure-001.png) text.';
     const note = await compileNoteMarkdown(markdown, {
       runDirectory: directory,
     });
@@ -85,12 +86,18 @@ describe("Markdown compilation", () => {
     expect(note.html).not.toContain("<figcaption>alt</figcaption>");
     expect(note.html).not.toContain("onerror");
     expect(note.structure.figures).toBe(4);
+    expect(note.assets).toEqual([
+      {
+        path: "assets/figures/figure-001.png",
+        sha256: await sha256File(path),
+      },
+    ]);
   });
 
   test("validates every HTML picture candidate before inlining srcset", async () => {
     const runDirectory = await temporary();
     const path = await figureFixture(runDirectory);
-    const local = "assets/figures/figure-001.png";
+    const local = "../assets/figures/figure-001.png";
     const note = await compileNoteMarkdown(
       `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
       { runDirectory },
@@ -122,7 +129,7 @@ describe("Markdown compilation", () => {
       "https://example.test/image.png",
       "//example.test/image.png",
       "../source.png",
-      "assets/figures/escape.png",
+      "../assets/figures/escape.png",
       "data:image/png;base64,YQ==",
     ]) {
       for (const markdown of [
@@ -138,7 +145,7 @@ describe("Markdown compilation", () => {
       }
     }
     await expect(
-      compileNoteMarkdown("![alt](assets/figures/missing.png)", {
+      compileNoteMarkdown("![alt](../assets/figures/missing.png)", {
         runDirectory: directory,
       }),
     ).rejects.toMatchObject({
@@ -148,12 +155,44 @@ describe("Markdown compilation", () => {
     await mkdir(`${linked}/assets`);
     await symlink(`${outside}/assets/figures`, `${linked}/assets/figures`);
     await expect(
-      compileNoteMarkdown("![alt](assets/figures/figure-001.png)", {
+      compileNoteMarkdown("![alt](../assets/figures/figure-001.png)", {
         runDirectory: linked,
       }),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ code: "invalid_image_path" })],
     });
+  });
+
+  test("rejects internal symbolic links and non-file figures for all image syntax", async () => {
+    const directory = await temporary();
+    const original = await figureFixture(directory);
+    await symlink(original, `${directory}/assets/figures/link.png`);
+    await symlink(
+      `${directory}/assets/figures`,
+      `${directory}/assets/figures/alias`,
+    );
+    await symlink(
+      `${directory}/assets/figures/missing.png`,
+      `${directory}/assets/figures/dangling.png`,
+    );
+    await mkdir(`${directory}/assets/figures/directory.png`);
+    for (const src of [
+      "../assets/figures/link.png",
+      "../assets/figures/dangling.png",
+      "../assets/figures/directory.png",
+      "../assets/figures/alias/figure-001.png",
+    ])
+      for (const markdown of [
+        `![alt](${src})`,
+        `![alt][ref]\n\n[ref]: ${src}`,
+        `<img src="${src}">`,
+        `<picture><source srcset="${src} 1x"><img src="../assets/figures/figure-001.png"></picture>`,
+      ])
+        await expect(
+          compileNoteMarkdown(markdown, { runDirectory: directory }),
+        ).rejects.toMatchObject({
+          issues: [expect.objectContaining({ code: "invalid_image_path" })],
+        });
   });
 
   test("uses library math and code conventions with nonblocking KaTeX fallback", async () => {

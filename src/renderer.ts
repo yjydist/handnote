@@ -265,14 +265,12 @@ async function screenshotTall(
 
 export async function renderDocument(
   note: CompiledNote,
-  runDirectory: string,
-  revision: number,
+  directory: string,
   width: number,
 ): Promise<RenderResult> {
   const warnings: LayoutWarning[] = [...note.warnings];
-  const directory = `${runDirectory}/intermediate/revisions`;
-  const htmlPath = `${directory}/revision-${String(revision).padStart(3, "0")}.html`;
-  const imagePath = `${directory}/revision-${String(revision).padStart(3, "0")}.png`;
+  const htmlPath = `${directory}/note.html`;
+  const imagePath = `${directory}/note.png`;
   let browser: Browser | undefined;
   try {
     const html = await buildHtml(note, width);

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import sharp from "sharp";
 import {
   type ContractChecks,
   type EvalAttempt,
@@ -13,9 +12,8 @@ import {
   shouldRetryTransientRun,
   summarizeEvalJobs,
 } from "../scripts/real-eval.ts";
-import type { RunManifest, RunStatus } from "../src/run.ts";
-import { sha256File } from "../src/utils.ts";
-import { simpleMarkdown } from "./helpers.ts";
+import type { RunStatus } from "../src/run.ts";
+import { createStoreFixture, simpleMarkdown } from "./helpers.ts";
 
 const directories: string[] = [];
 
@@ -74,7 +72,27 @@ function attempt(
       maxImages: 2,
     },
     stepDurationsMs: [10, totalTokens],
+    sessionTrailingBytes: 0,
     contracts: allContracts(status === "complete"),
+  };
+}
+
+function reportForJobs(jobs: EvalJob[]): EvalReport {
+  return {
+    generatedAt: "2026-08-23T00:00:00.000Z",
+    configuration: {
+      baseUrlOrigin: "https://example.test",
+      model: "offline",
+      timeoutMs: 240_000,
+      maxRetries: 1,
+      maxSteps: 12,
+      maxInspectCalls: 3,
+      width: 1600,
+      promptSha256: "a".repeat(64),
+      fingerprint: "b".repeat(64),
+    },
+    summary: summarizeEvalJobs(jobs),
+    jobs,
   };
 }
 
@@ -157,114 +175,164 @@ describe("real evaluation aggregation", () => {
       widthExact: 3,
     });
 
-    const report: EvalReport = {
-      generatedAt: "2026-08-23T00:00:00.000Z",
-      configuration: {
-        baseUrlOrigin: "https://example.test",
-        model: "offline",
-        timeoutMs: 240_000,
-        maxRetries: 1,
-        maxSteps: 12,
-        maxInspectCalls: 3,
-        width: 1600,
-        promptSha256: "a".repeat(64),
-        fingerprint: "b".repeat(64),
-      },
-      summary,
-      jobs,
-    };
+    const report = reportForJobs(jobs);
     const markdown = renderEvalReport(report);
     expect(markdown).toContain("First pass: 1/3 complete (33.3%)");
     expect(markdown).toContain("Eventual: 3/3 complete (100.0%)");
     expect(markdown).not.toMatch(/apiKey|authorization|base64/i);
   });
 
-  test("audits an offline complete run fixture", async () => {
-    const directory = await temporary();
-    await mkdir(`${directory}/session`);
-    await mkdir(`${directory}/revisions`, { recursive: true });
-    const documentPath = `${directory}/note.md`;
-    const revisionPath = `${directory}/revisions/revision-001.md`;
-    const imagePath = `${directory}/note.png`;
-    const markdown = simpleMarkdown();
-    await writeFile(documentPath, markdown);
-    await writeFile(revisionPath, markdown);
-    await sharp({
-      create: { width: 1600, height: 400, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(imagePath);
-    const events = [
-      {
-        seq: 1,
-        time: "2026-08-23T00:00:00.000Z",
-        type: "run.started",
-        data: { config: { model: { apiKey: "[REDACTED]" }, width: 1600 } },
-      },
-      {
-        seq: 2,
-        time: "2026-08-23T00:00:00.010Z",
-        type: "model.attempt.started",
-        data: { step: 1, request: { bytes: 100, imageCount: 1 } },
-      },
-      {
-        seq: 3,
-        time: "2026-08-23T00:00:00.030Z",
-        type: "model.step.completed",
-        data: { step: 1 },
-      },
-      {
-        seq: 4,
-        time: "2026-08-23T00:00:00.040Z",
-        type: "note.finalized",
-        data: { revision: 1 },
-      },
-    ];
-    await writeFile(
-      `${directory}/session/events.jsonl`,
-      `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
-    );
-    const manifest: RunManifest = {
-      status: "complete",
-      runId: "offline-complete",
-      startedAt: "2026-08-23T00:00:00.000Z",
-      finishedAt: "2026-08-23T00:00:00.050Z",
-      durationMs: 50,
-      stopReason: "finalized",
-      input: { path: "/data/001.jpg", original: "original.jpg" },
-      final: {
-        markdown: "note.md",
-        image: "note.png",
-        markdownSha256: await sha256File(documentPath),
-        imageSha256: await sha256File(imagePath),
-        revision: 1,
-      },
-      model: {
-        steps: 1,
-        retries: 0,
-        attempts: 1,
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-          cachedInputTokens: 8,
-          uncachedInputTokens: 2,
-          reasoningTokens: 3,
-          textOutputTokens: 2,
+  test.each(["none", "partial", "unterminated-event"])(
+    "audits a complete run with session tail: %s",
+    async (tailKind) => {
+      const directory = await temporary();
+      const store = await createStoreFixture(directory);
+      store.recorder.record("run.started", {
+        config: { width: 1600, model: { apiKey: "[REDACTED]" } },
+      });
+      store.recorder.record("model.attempt.started", {
+        step: 1,
+        attempt: 1,
+        request: { bytes: 100, imageCount: 1 },
+      });
+      const usage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 };
+      store.recorder.record("model.step.completed", { step: 1, usage });
+      await store.updateModel({ steps: 1, attempts: 1, usage });
+      await store.commit(
+        { markdown: simpleMarkdown(), audit: {} },
+        { kind: "write", step: 1, width: 1600 },
+      );
+      await store.review(2, async () => {});
+      await store.finalize(3);
+      const events = (await readFile(store.recorder.path, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      for (const event of events) {
+        if (event.type === "model.attempt.started")
+          event.time = "2026-08-23T00:00:00.010Z";
+        if (event.type === "model.step.completed")
+          event.time = "2026-08-23T00:00:00.030Z";
+      }
+      const tail =
+        tailKind === "none"
+          ? ""
+          : tailKind === "partial"
+            ? '{"seq":'
+            : JSON.stringify({
+                seq: events.length + 1,
+                time: "2026-08-23T00:00:00.050Z",
+                type: "model.attempt.started",
+                data: {
+                  step: 4,
+                  attempt: 1,
+                  request: { bytes: 999, imageCount: 9 },
+                },
+              });
+      await writeFile(
+        store.recorder.path,
+        `${events.map((event) => JSON.stringify(event)).join("\n")}\n${tail}`,
+      );
+      const paths = [store.path("run.json"), store.recorder.path];
+      const before = await Promise.all(paths.map((path) => readFile(path)));
+      const inspected = await inspectEvalAttempt(
+        {
+          manifest: store.manifest,
+          runDirectory: directory,
+          manifestPath: store.path("run.json"),
+          exitCode: 0,
         },
+        "fixture.png",
+      );
+      expect(inspected.input).toBe("fixture.png");
+      expect(inspected.status).toBe("complete");
+      expect(inspected.usage).toMatchObject(usage);
+      expect(inspected.sessionTrailingBytes).toBe(Buffer.byteLength(tail));
+      expect(inspected.contracts).toEqual(allContracts(true));
+      expect(inspected.stepDurationsMs).toEqual([20]);
+      expect(inspected.requests).toEqual({
+        attempts: 1,
+        bytes: 100,
+        maxBytes: 100,
+        maxImages: 1,
+      });
+      const report = reportForJobs([
+        {
+          id: "fixture#1",
+          inputPath: "/offline/fixture.png",
+          attempts: [inspected],
+        },
+      ]);
+      expect(
+        JSON.parse(JSON.stringify(report)).jobs[0].attempts[0]
+          .sessionTrailingBytes,
+      ).toBe(Buffer.byteLength(tail));
+      expect(report.summary.eventual.complete).toBe(1);
+      const markdown = renderEvalReport(report);
+      if (tail)
+        expect(markdown).toContain(
+          `${store.manifest.runId}: incomplete session tail (${Buffer.byteLength(tail)} bytes)`,
+        );
+      else expect(markdown).not.toContain("## Session diagnostics");
+      expect(await Promise.all(paths.map((path) => readFile(path)))).toEqual(
+        before,
+      );
+    },
+  );
+
+  test.each(["invalid-json", "invalid-sequence"])(
+    "rejects a complete session line with %s without changing the run",
+    async (damage) => {
+      const store = await createStoreFixture(await temporary());
+      await store.finish("model_stopped_no_revision");
+      const line =
+        damage === "invalid-json"
+          ? '{"seq":\n'
+          : `${JSON.stringify({ seq: 1, time: "2026-08-23T00:00:00.050Z", type: "duplicate", data: {} })}\n`;
+      await appendFile(store.recorder.path, line);
+      const paths = [store.path("run.json"), store.recorder.path];
+      const before = await Promise.all(paths.map((path) => readFile(path)));
+      await expect(
+        inspectEvalAttempt(
+          {
+            manifest: store.manifest,
+            runDirectory: store.directory,
+            manifestPath: store.path("run.json"),
+            exitCode: 1,
+          },
+          "fixture.png",
+        ),
+      ).rejects.toMatchObject({ kind: "filesystem" });
+      expect(await Promise.all(paths.map((path) => readFile(path)))).toEqual(
+        before,
+      );
+    },
+  );
+
+  test("audits a partial run from its revision without requiring final output", async () => {
+    const directory = await temporary();
+    const store = await createStoreFixture(directory);
+    store.recorder.record("run.started", { config: { width: 700 } });
+    await store.commit(
+      { markdown: simpleMarkdown(), audit: {} },
+      { kind: "write", step: 1, width: 700 },
+    );
+    await store.finish("model_stopped");
+    const result = await inspectEvalAttempt(
+      {
+        manifest: store.manifest,
+        runDirectory: directory,
+        manifestPath: store.path("run.json"),
+        exitCode: 2,
       },
-      warnings: [],
-      runDirectory: directory,
-      exitCode: 0,
-    };
-    const inspected = await inspectEvalAttempt(manifest);
-    expect(inspected.contracts).toEqual(allContracts(true));
-    expect(inspected.stepDurationsMs).toEqual([20]);
-    expect(inspected.requests).toEqual({
-      attempts: 1,
-      bytes: 100,
-      maxBytes: 100,
-      maxImages: 1,
+      "partial.png",
+    );
+    expect(result.contracts).toMatchObject({
+      artifactContract: true,
+      hashesValid: true,
+      schemaValid: true,
+      widthExact: true,
+      finalizedEvent: false,
     });
   });
 

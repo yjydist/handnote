@@ -2,6 +2,7 @@ import type { LanguageModelV4 } from "@ai-sdk/provider";
 import type { HandnoteConfig } from "../config.ts";
 import type { SessionRecorder } from "../session.ts";
 import type { RunState } from "../state.ts";
+import type { RunStore } from "../store.ts";
 
 export interface ProviderStats {
   retries: number;
@@ -14,6 +15,7 @@ export interface RetryConfig {
 }
 
 export interface ProviderModelContext {
+  store?: RunStore;
   config: HandnoteConfig;
   recorder: SessionRecorder;
   state: RunState;

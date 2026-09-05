@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
-import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
 import { createHandnoteTools } from "../src/tools/index.ts";
+import { createStoreFixture } from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -29,8 +29,10 @@ describe("capture_figure tool", () => {
     })
       .png()
       .toFile(source);
-    const recorder = new SessionRecorder(directory);
+    const store = await createStoreFixture(directory);
+    const recorder = store.recorder;
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,
@@ -47,7 +49,7 @@ describe("capture_figure tool", () => {
     const first = await execute({ region }, context);
     expect(first).toMatchObject({
       ok: true,
-      relativePath: "assets/figures/figure-001.png",
+      relativePath: "../assets/figures/figure-001.png",
       width: 100,
       height: 25,
     });
@@ -60,12 +62,12 @@ describe("capture_figure tool", () => {
     );
     expect(second).toMatchObject({
       ok: true,
-      relativePath: "assets/figures/figure-002.png",
+      relativePath: "../assets/figures/figure-002.png",
     });
     const cached = await execute({ region }, context);
     expect(cached).toMatchObject({
       ok: true,
-      relativePath: "assets/figures/figure-001.png",
+      relativePath: "../assets/figures/figure-001.png",
     });
     const events = (await readFile(recorder.path, "utf8"))
       .trim()
@@ -93,7 +95,9 @@ describe("capture_figure tool", () => {
     })
       .png()
       .toFile(source);
+    const store = await createStoreFixture(directory);
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,
@@ -101,7 +105,7 @@ describe("capture_figure tool", () => {
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
       state: new RunState(),
-      recorder: new SessionRecorder(directory),
+      recorder: store.recorder,
     });
     const execute = tools.capture_figure.execute;
     if (!execute) throw new Error("missing capture_figure execute");
@@ -118,7 +122,9 @@ describe("capture_figure tool", () => {
     const directory = await temporary();
     const source = `${directory}/missing.png`;
     const state = new RunState();
+    const store = await createStoreFixture(directory);
     const tools = createHandnoteTools({
+      store,
       sourcePath: source,
       runDirectory: directory,
       width: 700,
@@ -126,7 +132,7 @@ describe("capture_figure tool", () => {
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
       state,
-      recorder: new SessionRecorder(directory),
+      recorder: store.recorder,
     });
     const execute = tools.capture_figure.execute;
     if (!execute) throw new Error("missing capture_figure execute");
@@ -151,7 +157,7 @@ describe("capture_figure tool", () => {
       .toFile(source);
     await expect(execute(input, context)).resolves.toMatchObject({
       ok: true,
-      relativePath: "assets/figures/figure-002.png",
+      relativePath: "../assets/figures/figure-002.png",
     });
   });
 });

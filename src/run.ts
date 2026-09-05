@@ -1,59 +1,24 @@
 import { constants } from "node:fs";
-import { access, copyFile, mkdir, readdir, rm } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { access, readdir, rm } from "node:fs/promises";
+import { basename, extname, relative, resolve } from "node:path";
 import { createAgentRunStats, runAgent } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
+import type { RunResult } from "./manifest.ts";
 import { createModel, type ProviderStats } from "./provider/index.ts";
-import { SessionRecorder } from "./session.ts";
+import { checkedRunPath } from "./run-path.ts";
+import type { SessionRecorder } from "./session.ts";
 import { RunState } from "./state.ts";
+import { RunStore } from "./store.ts";
 import { createHandnoteTools } from "./tools/index.ts";
 import {
-  atomicWrite,
   createUniqueDirectory,
   isoWithOffset,
   mimeForExtension,
-  sha256File,
 } from "./utils.ts";
 
-export type RunStatus = "complete" | "partial" | "failed";
-
-export interface RunManifest {
-  status: RunStatus;
-  runId?: string;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  stopReason: string;
-  input: { path: string; sha256?: string; original?: string };
-  final?: {
-    markdown: string;
-    image: string;
-    markdownSha256: string;
-    imageSha256: string;
-    revision: number;
-  };
-  model: {
-    steps: number;
-    retries: number;
-    attempts: number;
-    usage: {
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-      cachedInputTokens?: number;
-      uncachedInputTokens?: number;
-      cacheHitRate?: number;
-      reasoningTokens?: number;
-      textOutputTokens?: number;
-    };
-  };
-  warnings: unknown[];
-  error?: { kind: string; message: string };
-  runDirectory?: string;
-  exitCode: 0 | 1 | 2;
-}
+export type { RunManifest, RunResult, RunStatus } from "./manifest.ts";
 
 export async function validateInput(
   input: string,
@@ -88,13 +53,25 @@ async function cleanupIntermediate(
   runDirectory: string,
   recorder: SessionRecorder,
 ): Promise<void> {
-  const directory = `${runDirectory}/intermediate`;
+  const directory = checkedRunPath(runDirectory, "intermediate/inspections", {
+    kind: "directory",
+  });
   const collect = async (path: string): Promise<string[]> => {
     const output: string[] = [];
     for (const entry of await readdir(path, { withFileTypes: true }).catch(
-      () => [],
+      (error) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      },
     )) {
-      const child = `${path}/${entry.name}`;
+      const child = checkedRunPath(
+        runDirectory,
+        relative(runDirectory, `${path}/${entry.name}`),
+        {
+          kind: entry.isDirectory() ? "directory" : "file",
+          allowMissing: false,
+        },
+      );
       if (entry.isDirectory()) output.push(...(await collect(child)));
       else output.push(child);
     }
@@ -113,237 +90,144 @@ async function cleanupIntermediate(
   await rm(directory, { recursive: true, force: true });
 }
 
-function summarizeUsage(usage: {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  cachedInputTokens?: number;
-  reasoningTokens?: number;
-  textOutputTokens?: number;
-}): RunManifest["model"]["usage"] {
-  const inputTokens = usage.inputTokens;
-  const cachedInputTokens = usage.cachedInputTokens;
-  const uncachedInputTokens =
-    inputTokens === undefined || cachedInputTokens === undefined
-      ? undefined
-      : Math.max(0, inputTokens - cachedInputTokens);
-  const cacheHitRate =
-    inputTokens && cachedInputTokens !== undefined
-      ? Number((cachedInputTokens / inputTokens).toFixed(6))
-      : undefined;
-  return {
-    ...(usage.inputTokens !== undefined
-      ? { inputTokens: usage.inputTokens }
-      : {}),
-    ...(usage.outputTokens !== undefined
-      ? { outputTokens: usage.outputTokens }
-      : {}),
-    ...(usage.totalTokens !== undefined
-      ? { totalTokens: usage.totalTokens }
-      : {}),
-    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
-    ...(uncachedInputTokens !== undefined ? { uncachedInputTokens } : {}),
-    ...(cacheHitRate !== undefined ? { cacheHitRate } : {}),
-    ...(usage.reasoningTokens !== undefined
-      ? { reasoningTokens: usage.reasoningTokens }
-      : {}),
-    ...(usage.textOutputTokens !== undefined
-      ? { textOutputTokens: usage.textOutputTokens }
-      : {}),
-  };
-}
-
 export async function executeRun(
   inputArgument: string,
   configArgument: string,
   outputArgument: string,
-): Promise<RunManifest> {
-  const started = new Date();
+): Promise<RunResult> {
+  const startedAt = isoWithOffset();
   const input = await validateInput(inputArgument);
   const config = await loadConfig(configArgument);
-  const outputRoot = resolve(outputArgument);
-  let allocated: Awaited<ReturnType<typeof createUniqueDirectory>>;
-  let recorder: SessionRecorder;
+  let store: RunStore;
   try {
-    await mkdir(outputRoot, { recursive: true });
-    await access(outputRoot, constants.R_OK | constants.W_OK);
-    allocated = await createUniqueDirectory(
-      outputRoot,
+    const allocated = await createUniqueDirectory(
+      resolve(outputArgument),
       basename(input.path, input.extension),
     );
-    recorder = new SessionRecorder(allocated.path, {
+    store = await RunStore.create(allocated.path, {
+      inputExtension: input.extension,
+      runId: allocated.id,
+      startedAt,
       secrets: [config.model.apiKey],
     });
-    recorder.record("run.started", {
-      runId: allocated.id,
-      input: input.path,
-      config: {
-        ...config,
-        promptText: "[PROMPT_RECORDED_BY_HASH]",
-      },
-    });
   } catch (error) {
-    if (error instanceof HandnoteError) throw error;
     throw new HandnoteError(
-      `Cannot initialize output directory: ${outputRoot}`,
+      "Cannot initialize output directory",
       "filesystem",
       false,
       { cause: error },
     );
   }
+  const recorder = store.recorder;
   const stats: ProviderStats = { retries: 0, attempts: 0 };
   const agentStats = createAgentRunStats();
   const state = new RunState();
-  let originalSha256: string | undefined;
-  let modelSteps = 0;
-  let status: RunStatus = "failed";
   let stopReason = "internal_error";
   let terminalError: HandnoteError | undefined;
-  const originalPath = `${allocated.path}/original${input.extension}`;
   try {
-    await copyFile(input.path, originalPath);
-    originalSha256 = await sha256File(originalPath);
-    if (originalSha256 !== (await sha256File(input.path)))
-      throw new HandnoteError(
-        "Original image copy hash mismatch",
-        "filesystem",
-      );
-    recorder.record("input.copied", {
-      path: basename(originalPath),
-      sha256: originalSha256,
-      mimeType: input.mimeType,
+    recorder.record("run.started", {
+      runId: store.manifest.runId,
+      input: input.path,
+      config: { ...config, promptText: "[PROMPT_RECORDED_BY_HASH]" },
     });
-    const tools = createHandnoteTools({
-      sourcePath: originalPath,
-      runDirectory: allocated.path,
-      width: config.width,
-      maxSteps: config.maxSteps,
-      maxInspectCalls: config.maxInspectCalls,
-      toolMedia: config.toolMedia,
-      state,
-      recorder,
-    });
-    const model = createModel({ config, recorder, state, stats });
-    const result = await runAgent({
-      config,
-      model,
-      tools,
-      sourcePath: originalPath,
-      sourceMimeType: input.mimeType,
-      recorder,
-      state,
-      stats: agentStats,
-    });
-    modelSteps = result.steps;
-    if (state.revision && state.finalizedRevision === state.revision.number) {
-      status = "complete";
-      stopReason = "finalized";
-    } else if (state.revision) {
-      status = "partial";
-      stopReason =
-        result.steps >= config.maxSteps ? "max_steps" : "model_stopped";
-    } else {
+    try {
+      await store.copyInput(input.path);
+      const sourcePath = store.path(store.manifest.input.path);
+      const tools = createHandnoteTools({
+        store,
+        sourcePath,
+        runDirectory: store.directory,
+        width: config.width,
+        maxSteps: config.maxSteps,
+        maxInspectCalls: config.maxInspectCalls,
+        toolMedia: config.toolMedia,
+        state,
+        recorder,
+      });
+      const model = createModel({ config, recorder, state, stats, store });
+      const result = await runAgent({
+        config,
+        model,
+        tools,
+        sourcePath,
+        sourceMimeType: input.mimeType,
+        recorder,
+        state,
+        stats: agentStats,
+        store,
+      });
+      const hasRevision = Boolean(store.manifest.currentRevision);
       stopReason =
         result.steps >= config.maxSteps
-          ? "max_steps_no_revision"
-          : "model_stopped_no_revision";
-    }
-  } catch (error) {
-    const runError =
-      error instanceof HandnoteError
-        ? error
-        : new HandnoteError(asError(error).message, "internal", false, {
-            cause: error,
-          });
-    recorder.record("run.error", {
-      kind: runError.kind,
-      message: runError.message,
-      error: safeErrorMetadata(runError.cause ?? runError),
-    });
-    if (state.revision && state.finalizedRevision === state.revision.number) {
-      status = "complete";
-      stopReason = "finalized";
-    } else {
-      terminalError = runError;
+          ? hasRevision
+            ? "max_steps"
+            : "max_steps_no_revision"
+          : hasRevision
+            ? "model_stopped"
+            : "model_stopped_no_revision";
+    } catch (error) {
+      terminalError =
+        error instanceof HandnoteError
+          ? error
+          : new HandnoteError(asError(error).message, "internal", false, {
+              cause: error,
+            });
       stopReason = terminalError.kind;
-      if (state.revision) status = "partial";
+      recorder.record("run.error", {
+        kind: terminalError.kind,
+        message: terminalError.message,
+        error: safeErrorMetadata(terminalError.cause ?? terminalError),
+      });
     }
-  }
-
-  let final: RunManifest["final"];
-  try {
-    if ((status === "complete" || status === "partial") && state.revision) {
-      const markdownPath = `${allocated.path}/note.md`;
-      const imagePath = `${allocated.path}/note.png`;
-      await atomicWrite(markdownPath, state.revision.markdown);
-      await atomicWrite(
-        imagePath,
-        new Uint8Array(
-          await Bun.file(state.revision.render.imagePath).arrayBuffer(),
-        ),
-      );
-      final = {
-        markdown: "note.md",
-        image: "note.png",
-        markdownSha256: await sha256File(markdownPath),
-        imageSha256: await sha256File(imagePath),
-        revision: state.revision.number,
-      };
-      recorder.record("output.committed", final);
+    if (!config.saveIntermediateImages) {
+      try {
+        await cleanupIntermediate(store.directory, recorder);
+      } catch (error) {
+        recorder.record("cleanup.failed", { error: safeErrorMetadata(error) });
+      }
     }
-    if (!config.saveIntermediateImages)
-      await cleanupIntermediate(allocated.path, recorder);
+    await store.updateModel({
+      steps: state.modelStep,
+      retries: stats.retries,
+      attempts: stats.attempts,
+      usage: agentStats.usage,
+    });
+    const manifest = await store.finish(
+      stopReason,
+      terminalError
+        ? { kind: terminalError.kind, message: terminalError.message }
+        : undefined,
+    );
+    return {
+      manifest,
+      runDirectory: store.directory,
+      manifestPath: store.path("run.json"),
+      exitCode:
+        manifest.status === "complete"
+          ? 0
+          : manifest.status === "partial"
+            ? 2
+            : 1,
+    };
   } catch (error) {
-    terminalError = new HandnoteError(
-      "Failed to commit or clean up run artifacts",
+    const manifest = store.manifest;
+    if (manifest.status === "complete") {
+      console.error(
+        "Final output is complete; post-finalization work failed",
+        safeErrorMetadata(error),
+      );
+      return {
+        manifest,
+        runDirectory: store.directory,
+        manifestPath: store.path("run.json"),
+        exitCode: 0,
+      };
+    }
+    throw new HandnoteError(
+      "Cannot persist final run state",
       "filesystem",
       false,
       { cause: error },
     );
-    status = "failed";
-    stopReason = terminalError.kind;
-    final = undefined;
-    await Promise.all([
-      rm(`${allocated.path}/note.md`, { force: true }),
-      rm(`${allocated.path}/note.png`, { force: true }),
-    ]);
-    recorder.record("run.error", {
-      kind: terminalError.kind,
-      message: terminalError.message,
-      error: safeErrorMetadata(error),
-    });
   }
-  const finished = new Date();
-  const manifest: RunManifest = {
-    status,
-    runId: allocated.id,
-    startedAt: isoWithOffset(started),
-    finishedAt: isoWithOffset(finished),
-    durationMs: finished.getTime() - started.getTime(),
-    stopReason,
-    input: {
-      path: input.path,
-      ...(originalSha256 ? { sha256: originalSha256 } : {}),
-      original: basename(originalPath),
-    },
-    ...(final ? { final } : {}),
-    model: {
-      steps: modelSteps || state.modelStep,
-      retries: stats.retries,
-      attempts: stats.attempts,
-      usage: summarizeUsage(agentStats.usage),
-    },
-    warnings: state.revision?.render.warnings ?? [],
-    ...(terminalError
-      ? { error: { kind: terminalError.kind, message: terminalError.message } }
-      : {}),
-    runDirectory: allocated.path,
-    exitCode: status === "complete" ? 0 : status === "partial" ? 2 : 1,
-  };
-  recorder.record("run.finished", manifest);
-  await atomicWrite(
-    `${allocated.path}/run.json`,
-    `${JSON.stringify(manifest, null, 2)}\n`,
-  );
-  return manifest;
 }

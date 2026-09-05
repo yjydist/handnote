@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, open, rm } from "node:fs/promises";
 import sharp from "sharp";
 import { z } from "zod";
 import { type Region, regionSchema } from "./document.ts";
@@ -268,10 +268,19 @@ export async function captureFigure(
   const suffix = String(sequence).padStart(3, "0");
   await mkdir(outputDirectory, { recursive: true });
   const path = `${outputDirectory}/figure-${suffix}.png`;
-  await Bun.write(path, data.data);
+  const file = await open(path, "wx");
+  try {
+    await file.writeFile(data.data);
+    await file.sync();
+  } catch (error) {
+    await rm(path, { force: true });
+    throw error;
+  } finally {
+    await file.close();
+  }
   return {
     path,
-    relativePath: `assets/figures/figure-${suffix}.png`,
+    relativePath: `../assets/figures/figure-${suffix}.png`,
     width: data.info.width,
     height: data.info.height,
   };
