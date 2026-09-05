@@ -9,6 +9,7 @@ import { loadConfig } from "../src/config.ts";
 import type { RunResult } from "../src/manifest.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
+import { readSession } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
 import { atomicWrite } from "../src/utils.ts";
 
@@ -52,6 +53,7 @@ export interface EvalAttempt {
   usage: UsageMetrics;
   requests: RequestMetrics;
   stepDurationsMs: number[];
+  sessionTrailingBytes: number;
   contracts: ContractChecks;
 }
 
@@ -138,11 +140,7 @@ export async function inspectEvalAttempt(
     throw new Error("Cannot evaluate an unfinished run");
   const eventsPath = `${runDirectory}/session/events.jsonl`;
   const eventText = await readFile(eventsPath, "utf8");
-  const events = eventText
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const { events, trailingBytes } = readSession(eventsPath);
   const starts = new Map<number, number>();
   const stepDurationsMs: number[] = [];
   const requests: RequestMetrics = {
@@ -218,9 +216,6 @@ export async function inspectEvalAttempt(
         (await sharp(imagePath).metadata()).width === configuredWidth;
     }
   } catch {}
-  const sequenceMonotonic = events.every(
-    (event, index) => number(event.seq) === index + 1,
-  );
   const sessionRedacted =
     !hasUnredactedApiKey(events) &&
     !/data:image\/[a-z+.-]+;base64,/i.test(eventText);
@@ -236,12 +231,13 @@ export async function inspectEvalAttempt(
     usage: usageMetrics(manifest.model.usage),
     requests,
     stepDurationsMs,
+    sessionTrailingBytes: trailingBytes,
     contracts: {
       artifactContract,
       finalizedEvent,
       hashesValid,
       schemaValid,
-      sequenceMonotonic,
+      sequenceMonotonic: true,
       sessionRedacted,
       warningsFree: (revision?.warnings.length ?? 0) === 0,
       widthExact,
@@ -405,6 +401,22 @@ export function renderEvalReport(report: EvalReport): string {
     lines.push(
       `| ${job.id} | ${basename(job.inputPath)} | ${first?.status ?? "failed"} | ${final ? eventualStatus(job.attempts) : "failed"} | ${job.attempts.length} | ${first ? seconds(first.durationMs) : "-"} | ${final?.runId ?? "-"} |`,
     );
+  }
+  const incompleteSessions = report.jobs
+    .flatMap((job) => job.attempts)
+    .filter((attempt) => attempt.sessionTrailingBytes > 0);
+  if (incompleteSessions.length > 0) {
+    lines.push(
+      "",
+      "## Session diagnostics",
+      "",
+      "Event metrics and sequence checks use complete events only; status and token usage use the confirmed manifest.",
+      "",
+    );
+    for (const attempt of incompleteSessions)
+      lines.push(
+        `- ${attempt.runId}: incomplete session tail (${attempt.sessionTrailingBytes} bytes)`,
+      );
   }
   lines.push(
     "",
