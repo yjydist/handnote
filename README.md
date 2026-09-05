@@ -121,4 +121,6 @@ bun run typecheck
 bun run check
 ```
 
+The [offline checks workflow](.github/workflows/ci.yml) runs these commands for pull requests targeting `dev` and pushes to `dev`. On Linux, use `bunx playwright install --with-deps chromium` to install Chromium and its system dependencies. No personal `config.yaml`, Provider credentials, or local `data/` are required.
+
 Tests are offline and must not call a real Provider. The MVP intentionally omits multiple images/models, OCR, human approval, resume/replay, remote tracing, Mastra Memory/Storage/Workflow, and compatibility migrations.
