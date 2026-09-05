@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { executeRun, validateInput } from "../src/run.ts";
@@ -52,6 +59,34 @@ function completion(name: string, args: unknown, sequence: number): Response {
       prompt_cache_hit_tokens: cacheHit,
       prompt_cache_miss_tokens: 10 - cacheHit,
     },
+  });
+}
+
+function completionMany(
+  calls: Array<[name: string, args: unknown]>,
+  sequence: number,
+): Response {
+  return Response.json({
+    id: `offline-${sequence}`,
+    object: "chat.completion",
+    created: 1,
+    model: "offline",
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: calls.map(([name, args], index) => ({
+            id: `call-${sequence}-${index}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) },
+          })),
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   });
 }
 
@@ -151,7 +186,7 @@ describe("run controller", () => {
     const draft = simpleDraft();
     draft.audit.uncertainties.push({
       id: "uncertainText",
-      target: { kind: "block", blockId: "paragraph-1" },
+      target: { quote: "这是正文。" },
       bestGuess: "这是正文。",
       candidates: ["这是正文。", "这是证文。"],
       basis: "session-only-basis",
@@ -160,15 +195,20 @@ describe("run controller", () => {
     });
     draft.audit.corrections.push({
       id: "correctedText",
-      target: { kind: "block", blockId: "paragraph-1" },
+      target: { quote: "这是正文。" },
       original: "这是证文。",
       corrected: "这是正文。",
       basis: "session-only-correction-basis",
       region: fullRegion,
       confidence: 0.99,
     });
+    const revised: typeof draft = {
+      markdown: `${draft.markdown}\n补充一段。\n`,
+      audit: draft.audit,
+    };
     const script = [
-      ["write_document", draft],
+      ["write_note", draft],
+      ["revise_note", revised],
       ["review_render", {}],
       ["finalize_note", {}],
     ] as const;
@@ -195,25 +235,25 @@ describe("run controller", () => {
       );
       expect(result.status).toBe("complete");
       expect(result.exitCode).toBe(0);
-      expect(requests).toBe(3);
-      expect(result.final?.revision).toBe(1);
-      expect(result.model.usage.totalTokens).toBe(45);
+      expect(requests).toBe(4);
+      expect(result.final?.revision).toBe(2);
+      expect(result.model.usage.totalTokens).toBe(60);
       expect(result.model.usage).toMatchObject({
-        inputTokens: 30,
-        cachedInputTokens: 16,
-        uncachedInputTokens: 14,
-        cacheHitRate: 0.533333,
+        inputTokens: 40,
+        cachedInputTokens: 24,
+        uncachedInputTokens: 16,
+        cacheHitRate: 0.6,
       });
-      const thirdMessages = requestBodies[2]?.messages as Array<
+      const fourthMessages = requestBodies[3]?.messages as Array<
         Record<string, unknown>
       >;
-      const toolMessages = thirdMessages.filter(
+      const toolMessages = fourthMessages.filter(
         (message) => message.role === "tool",
       );
       expect(JSON.stringify(toolMessages)).not.toMatch(
         /[A-Za-z0-9+/]{512,}={0,2}/,
       );
-      const visualMessage = [...thirdMessages]
+      const visualMessage = [...fourthMessages]
         .reverse()
         .find(
           (message) =>
@@ -225,18 +265,32 @@ describe("run controller", () => {
       const runDirectory = result.runDirectory;
       if (!runDirectory) throw new Error("missing run directory");
       expect(await sha256File(`${runDirectory}/original.png`)).toBe(inputHash);
-      expect(await Bun.file(`${runDirectory}/note.json`).exists()).toBe(true);
+      expect(await Bun.file(`${runDirectory}/note.md`).exists()).toBe(true);
       expect(await Bun.file(`${runDirectory}/note.png`).exists()).toBe(true);
-      const note = JSON.parse(
-        await readFile(`${runDirectory}/note.json`, "utf8"),
-      );
-      expect(note).toEqual(draft.document);
-      expect(note).not.toHaveProperty("audit");
-      expect(note).not.toHaveProperty("summary");
-      expect(note).not.toHaveProperty("corrections");
-      expect(note).not.toHaveProperty("uncertainties");
+      const noteMarkdown = await readFile(`${runDirectory}/note.md`, "utf8");
+      expect(noteMarkdown).toBe(revised.markdown);
+      expect(noteMarkdown).not.toContain("audit");
+      expect(noteMarkdown).not.toContain("session-only");
+      expect(
+        await Bun.file(`${runDirectory}/revisions/revision-001.md`).exists(),
+      ).toBe(true);
+      expect(
+        (await readFile(
+          `${runDirectory}/revisions/revision-001.md`,
+          "utf8",
+        )) === draft.markdown,
+      ).toBe(true);
+      const finalSha = result.final?.markdownSha256;
+      if (!finalSha) throw new Error("missing final markdown sha");
+      expect(
+        await sha256File(`${runDirectory}/revisions/revision-002.md`),
+      ).toBe(finalSha);
+      expect(await sha256File(`${runDirectory}/note.md`)).toBe(finalSha);
       expect(await Bun.file(`${runDirectory}/intermediate`).exists()).toBe(
         false,
+      );
+      expect((await stat(`${runDirectory}/revisions`)).isDirectory()).toBe(
+        true,
       );
       const session = await readFile(
         `${runDirectory}/session/events.jsonl`,
@@ -252,8 +306,8 @@ describe("run controller", () => {
       const attemptEvents = events.filter(
         (event) => event.type === "model.attempt.started",
       );
-      expect(attemptEvents).toHaveLength(3);
-      expect(attemptEvents[2].data.request).toMatchObject({
+      expect(attemptEvents).toHaveLength(4);
+      expect(attemptEvents[3].data.request).toMatchObject({
         imageCount: 2,
       });
       const committed = events.find(
@@ -277,13 +331,70 @@ describe("run controller", () => {
       );
       expect((await readdir(runDirectory)).sort()).toEqual(
         expect.arrayContaining([
-          "note.json",
+          "note.md",
           "note.png",
           "original.png",
+          "revisions",
           "run.json",
           "session",
         ]),
       );
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
+
+  test("keeps a successful same-step finalize complete despite a concurrent fatal tool error", async () => {
+    const directory = await temporary();
+    let requests = 0;
+    const runs = `${directory}/runs`;
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        requests++;
+        if (requests === 1)
+          return completion("write_note", simpleDraft(), requests);
+        if (requests === 2) return completion("review_render", {}, requests);
+        if (requests === 3) {
+          const [runName] = await readdir(runs);
+          if (!runName) throw new Error("missing allocated run");
+          await writeFile(
+            `${runs}/${runName}/assets`,
+            "blocks directory creation",
+          );
+          return completionMany(
+            [
+              ["finalize_note", {}],
+              [
+                "capture_figure",
+                { region: { x: 0, y: 0, width: 1, height: 1 } },
+              ],
+            ],
+            requests,
+          );
+        }
+        return new Response("unexpected request", { status: 500 });
+      },
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const result = await executeRun(input, `${directory}/config.yaml`, runs);
+      expect(result).toMatchObject({
+        status: "complete",
+        stopReason: "finalized",
+        exitCode: 0,
+        final: { revision: 1 },
+      });
+      expect(result.error).toBeUndefined();
+      const session = await readFile(
+        `${result.runDirectory}/session/events.jsonl`,
+        "utf8",
+      );
+      expect(session).toContain('"type":"run.error"');
     } finally {
       server.stop(true);
     }
@@ -297,7 +408,7 @@ describe("run controller", () => {
       fetch: () => {
         requests++;
         return requests === 1
-          ? completion("write_document", simpleDraft(), requests)
+          ? completion("write_note", simpleDraft(), requests)
           : textCompletion(requests);
       },
     });
@@ -352,7 +463,7 @@ describe("run controller", () => {
       expect(await Bun.file(`${result.runDirectory}/run.json`).exists()).toBe(
         true,
       );
-      expect(await Bun.file(`${result.runDirectory}/note.json`).exists()).toBe(
+      expect(await Bun.file(`${result.runDirectory}/note.md`).exists()).toBe(
         false,
       );
       const session = await readFile(
@@ -376,7 +487,7 @@ describe("run controller", () => {
       fetch: () => {
         requests++;
         if (requests === 1)
-          return completion("write_document", simpleDraft(), requests);
+          return completion("write_note", simpleDraft(), requests);
         if (requests === 2) return completion("review_render", {}, requests);
         return Response.json(
           { error: { message: "invalid API key", type: "authentication" } },
@@ -407,7 +518,7 @@ describe("run controller", () => {
         cachedInputTokens: 8,
         uncachedInputTokens: 12,
       });
-      expect(await Bun.file(`${result.runDirectory}/note.json`).exists()).toBe(
+      expect(await Bun.file(`${result.runDirectory}/note.md`).exists()).toBe(
         true,
       );
       expect(await Bun.file(`${result.runDirectory}/note.png`).exists()).toBe(

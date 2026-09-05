@@ -1,10 +1,11 @@
-import type { NoteDocument, RevisionAudit } from "./document.ts";
+import type { RevisionAudit } from "./document.ts";
 import type { HandnoteError } from "./errors.ts";
 import type { LayoutWarning, RenderResult } from "./renderer.ts";
 
 export interface Revision {
   number: number;
-  document: NoteDocument;
+  markdown: string;
+  markdownSha256: string;
   audit: RevisionAudit;
   render: RenderResult;
   renderedAtStep: number;
@@ -50,7 +51,8 @@ export class RunState {
   }
 
   commit(
-    document: NoteDocument,
+    markdown: string,
+    markdownSha256: string,
     audit: RevisionAudit,
     render: RenderResult,
   ): Revision {
@@ -58,7 +60,8 @@ export class RunState {
       throw new Error("Cannot commit a revision after finalization");
     this.revision = {
       number: (this.revision?.number ?? 0) + 1,
-      document,
+      markdown,
+      markdownSha256,
       audit,
       render,
       renderedAtStep: this.modelStep,
@@ -68,7 +71,7 @@ export class RunState {
 
   review(): Revision {
     if (this.finalized) throw new Error("Cannot review after finalization");
-    if (!this.revision) throw new Error("No document revision exists");
+    if (!this.revision) throw new Error("No note revision exists");
     this.revision.reviewedAtStep = this.modelStep;
     this.revision.reviewWarnings = this.revision.render.warnings;
     return this.revision;
@@ -80,7 +83,7 @@ export class RunState {
     if (this.finalized)
       return { ok: false, reason: "Run is already finalized" };
     const revision = this.revision;
-    if (!revision) return { ok: false, reason: "No document revision exists" };
+    if (!revision) return { ok: false, reason: "No note revision exists" };
     if (revision.reviewedAtStep === undefined)
       return { ok: false, reason: "Current revision has not been reviewed" };
     if (revision.reviewedAtStep <= revision.renderedAtStep)
@@ -100,7 +103,7 @@ export class RunState {
 
   markFinalized(revision: Revision): void {
     if (this.revision !== revision)
-      throw new Error("Cannot finalize a stale document revision");
+      throw new Error("Cannot finalize a stale note revision");
     if (this.finalized) throw new Error("Run is already finalized");
     this.#finalizedRevision = revision.number;
   }

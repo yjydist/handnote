@@ -286,6 +286,7 @@ describe("image inspection", () => {
       ok: false,
       error: { code: "inspection_budget_exhausted" },
     });
+    if (!rejected.ok) expect(rejected.error.message).toContain("write_note");
     expect(await readdir(`${directory}/intermediate/inspections`)).toHaveLength(
       3,
     );
@@ -301,6 +302,68 @@ describe("image inspection", () => {
     expect(
       events.filter((event) => event.type === "tool.inspect_source.rejected"),
     ).toHaveLength(1);
+  });
+
+  test("points the exhausted-budget message at write_note before a revision and revise_note after one", async () => {
+    const directory = await temporary();
+    const source = `${directory}/source.png`;
+    await sharp({
+      create: { width: 120, height: 80, channels: 3, background: "white" },
+    })
+      .png()
+      .toFile(source);
+    const state = new RunState();
+    const tools = createHandnoteTools({
+      sourcePath: source,
+      runDirectory: directory,
+      width: 700,
+      maxSteps: 18,
+      maxInspectCalls: 1,
+      toolMedia: { maxEdge: 2048, jpegQuality: 85 },
+      state,
+      recorder: new SessionRecorder(directory),
+    });
+    const execute = tools.inspect_source.execute;
+    if (!execute) throw new Error("missing inspect_source execute");
+    const executionContext = {} as Parameters<typeof execute>[1];
+    await execute(
+      { regions: [{ x: 0, y: 0, width: 0.5, height: 0.5 }] },
+      executionContext,
+    );
+    const before = await execute(
+      { regions: [{ x: 0.2, y: 0, width: 0.5, height: 0.5 }] },
+      executionContext,
+    );
+    expect(before).toMatchObject({
+      ok: false,
+      error: { code: "inspection_budget_exhausted" },
+    });
+    if (!before.ok) expect(before.error.message).toContain("write_note");
+    state.commit(
+      "markdown",
+      "hash",
+      { corrections: [], uncertainties: [] },
+      {
+        htmlPath: `${directory}/note.html`,
+        imagePath: `${directory}/note.png`,
+        width: 700,
+        height: 100,
+        warnings: [],
+        structure: {
+          headings: 0,
+          blocks: 0,
+          tables: 0,
+          equations: 0,
+          diagrams: 0,
+          figures: 0,
+        },
+      },
+    );
+    const after = await execute(
+      { regions: [{ x: 0.4, y: 0, width: 0.5, height: 0.5 }] },
+      executionContext,
+    );
+    if (!after.ok) expect(after.error.message).toContain("revise_note");
   });
 
   test("shares an in-flight inspection without consuming another budget slot", async () => {

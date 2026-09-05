@@ -15,7 +15,7 @@ import {
 } from "../scripts/real-eval.ts";
 import type { RunManifest, RunStatus } from "../src/run.ts";
 import { sha256File } from "../src/utils.ts";
-import { simpleDocument } from "./helpers.ts";
+import { simpleMarkdown } from "./helpers.ts";
 
 const directories: string[] = [];
 
@@ -182,9 +182,13 @@ describe("real evaluation aggregation", () => {
   test("audits an offline complete run fixture", async () => {
     const directory = await temporary();
     await mkdir(`${directory}/session`);
-    const documentPath = `${directory}/note.json`;
+    await mkdir(`${directory}/revisions`, { recursive: true });
+    const documentPath = `${directory}/note.md`;
+    const revisionPath = `${directory}/revisions/revision-001.md`;
     const imagePath = `${directory}/note.png`;
-    await writeFile(documentPath, `${JSON.stringify(simpleDocument())}\n`);
+    const markdown = simpleMarkdown();
+    await writeFile(documentPath, markdown);
+    await writeFile(revisionPath, markdown);
     await sharp({
       create: { width: 1600, height: 400, channels: 3, background: "white" },
     })
@@ -229,9 +233,9 @@ describe("real evaluation aggregation", () => {
       stopReason: "finalized",
       input: { path: "/data/001.jpg", original: "original.jpg" },
       final: {
-        document: "note.json",
+        markdown: "note.md",
         image: "note.png",
-        documentSha256: await sha256File(documentPath),
+        markdownSha256: await sha256File(documentPath),
         imageSha256: await sha256File(imagePath),
         revision: 1,
       },

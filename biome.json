@@ -6,6 +6,8 @@
       "!node_modules",
       "!runs",
       "!coverage",
+      "!data",
+      "!.claude",
       "!.agents/skills/mastra"
     ]
   },

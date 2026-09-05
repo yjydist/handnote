@@ -21,7 +21,7 @@ export function createInspectSourceTool(
   const inspections = new Map<string, Promise<InspectionOutput>>();
   return createTool({
     id: "inspect_source",
-    description: `Inspect one to eight normalized regions from the source image. Input: { regions: [{ x, y, width, height, scale?, enhancement? }], scale?, enhancement? }. Top-level scale/enhancement are batch defaults; a region may override either for its own crop. Regions crossing the right or bottom edge are clipped to the image. Multiple regions return a numbered contact sheet. At most ${context.maxInspectCalls} unique inspection calls are allowed; batch regions and then write the document.`,
+    description: `Inspect one to eight normalized regions from the source image. Input: { regions: [{ x, y, width, height, scale?, enhancement? }], scale?, enhancement? }. Top-level scale/enhancement are batch defaults; a region may override either for its own crop. Regions crossing the right or bottom edge are clipped to the image. Multiple regions return a numbered contact sheet. At most ${context.maxInspectCalls} unique inspection calls are allowed; batch regions and then write the note.`,
     inputSchema: inspectInputSchema,
     outputSchema: z.union([
       z.object({
@@ -58,7 +58,10 @@ export function createInspectSourceTool(
           return output;
         }
         if (inspectSequence >= context.maxInspectCalls) {
-          const message = `Inspection budget exhausted after ${context.maxInspectCalls} unique call(s). Do not call inspect_source again. Use the source and existing inspections, then call write_document now.`;
+          const nextTool = context.state.revision
+            ? "revise_note"
+            : "write_note";
+          const message = `Inspection budget exhausted after ${context.maxInspectCalls} unique call(s). Do not call inspect_source again. Use the source and existing inspections, then call ${nextTool} now.`;
           const output = {
             ...toolError("inspection_budget_exhausted", message),
             summary: message,
