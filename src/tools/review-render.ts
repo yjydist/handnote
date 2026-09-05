@@ -11,7 +11,7 @@ export function createReviewRenderTool(
   return createTool({
     id: "review_render",
     description:
-      "Return the current revision render and precise layout warnings. Compare it with the source for completeness, source-only titles, faithful wording, and absence of summaries, observer commentary, or visible audit material. Batch all discovered fixes into one full-document revision; source regions cannot fix layout.",
+      "Return the current revision render and precise layout warnings. Source audit matches do not establish visual presence. Compare it with the source for visible content, completeness, source-only titles, faithful wording, and absence of summaries, observer commentary, or visible audit material. Batch all discovered fixes into one full-document revision; source regions cannot fix layout.",
     inputSchema: z.object({}).strict(),
     outputSchema: z.union([
       z.object({

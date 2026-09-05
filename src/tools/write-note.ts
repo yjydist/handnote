@@ -1,13 +1,7 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import {
-  emptyRevisionAudit,
-  type RevisionAudit,
-  revisionDraftSchema,
-  validateAuditTargets,
-} from "../document.ts";
-import { MarkdownValidationError, parseNoteMarkdown } from "../markdown.ts";
-import { hasRenderedSemanticContent } from "../markdown-semantics.ts";
+import { type RevisionDraft, revisionDraftSchema } from "../document.ts";
+import { compileNoteMarkdown, MarkdownValidationError } from "../markdown.ts";
 import { renderDocument } from "../renderer.ts";
 import { atomicWrite, sha256 } from "../utils.ts";
 import type { ToolRuntime } from "./shared.ts";
@@ -56,69 +50,34 @@ export type NoteToolResult = NoteToolSuccess | ReturnType<typeof toolError>;
 
 export async function commitNoteDraft(
   context: ToolContext,
-  runtime: ToolRuntime,
   draft: { markdown: string; audit?: unknown },
 ): Promise<NoteToolResult> {
-  let parsed: {
-    markdown: string;
-    audit: { corrections: unknown[]; uncertainties: unknown[] };
-  };
+  let parsed: RevisionDraft;
   try {
     parsed = revisionDraftSchema.parse(draft);
   } catch (error) {
     if (error instanceof z.ZodError)
       return toolError("invalid_audit", z.prettifyError(error));
-    return runtime.fatal(error);
+    throw error;
   }
-  const audit: RevisionAudit = emptyRevisionAudit();
-  audit.corrections = parsed.audit.corrections as typeof audit.corrections;
-  audit.uncertainties = parsed.audit
-    .uncertainties as typeof audit.uncertainties;
-  let note: Awaited<ReturnType<typeof parseNoteMarkdown>> | undefined;
-  let noteError: MarkdownValidationError | undefined;
+  const { audit } = parsed;
+  const number = (context.state.revision?.number ?? 0) + 1;
+  let render: Awaited<ReturnType<typeof renderDocument>>;
   try {
-    note = await parseNoteMarkdown(parsed.markdown, {
+    const note = await compileNoteMarkdown(parsed.markdown, {
       runDirectory: context.runDirectory,
     });
+    render = await renderDocument(
+      note,
+      context.runDirectory,
+      number,
+      context.width,
+    );
   } catch (error) {
-    if (!(error instanceof MarkdownValidationError)) throw error;
-    noteError = error;
+    if (error instanceof MarkdownValidationError)
+      return toolError("invalid_markdown", error.message);
+    throw error;
   }
-  if (noteError)
-    return toolError(
-      "invalid_markdown",
-      noteError.issues
-        .map(
-          (issue) =>
-            `${issue.code}${issue.line ? ` (line ${issue.line})` : ""}: ${issue.message}`,
-        )
-        .join("; "),
-    );
-  if (!note) throw new Error("parseNoteMarkdown returned without a value");
-  const number = (context.state.revision?.number ?? 0) + 1;
-  const { render, semanticEvidence } = await renderDocument(
-    note,
-    context.runDirectory,
-    number,
-    context.width,
-  );
-  if (semanticEvidence.forbiddenMermaidContent)
-    return toolError(
-      "invalid_markdown",
-      "link_not_allowed: Links, embedded media, and event handlers are not allowed in rendered Mermaid diagrams",
-    );
-  if (!hasRenderedSemanticContent(note.tree, semanticEvidence))
-    return toolError(
-      "invalid_markdown",
-      "empty_document: Markdown document must contain visible content",
-    );
-  const auditTargetErrors = validateAuditTargets(
-    note.tree,
-    audit,
-    semanticEvidence,
-  );
-  if (auditTargetErrors.length > 0)
-    return toolError("invalid_audit", auditTargetErrors.join("; "));
   const markdownSha256 = sha256(parsed.markdown);
   const revisionPath = `${context.runDirectory}/revisions/revision-${String(number).padStart(3, "0")}.md`;
   await atomicWrite(revisionPath, parsed.markdown);
@@ -150,7 +109,7 @@ export function createWriteNoteTool(
   return createTool({
     id: "write_note",
     description:
-      "Validate, render, and commit the first complete source-faithful GFM note plus session-only revision audit. Input: { markdown, audit }. The markdown is the whole note in GFM; the audit never appears in the rendered note. Source and audit regions record provenance only and do not control layout.",
+      "Validate, render, and commit the first complete source-faithful GFM note plus session-only revision audit. Input: { markdown, audit }. Audit quotes locate exact Markdown source fragments before rendering. The markdown is the whole note in GFM; the audit never appears in the rendered note. Source and audit regions record provenance only and do not control layout.",
     inputSchema: noteDraftInputSchema,
     outputSchema: noteRevisionOutputSchema,
     execute: async (input) =>
@@ -166,7 +125,7 @@ export function createWriteNoteTool(
             "A revision already exists; use revise_note to replace the full markdown",
           );
         try {
-          return await commitNoteDraft(context, runtime, input);
+          return await commitNoteDraft(context, input);
         } catch (error) {
           return runtime.fatal(error);
         }

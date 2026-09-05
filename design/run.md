@@ -11,8 +11,8 @@ handnote run <image> --config <yaml> --output <dir> [--json]
 | 路径 | 内容 |
 |:----:|:----:|
 | `original{ext}` | 复制后的源图 |
-| `note.md` | 最终 GFM markdown (被 finalize 的 revision 原字节) |
-| `note.png` | 最终渲染图 |
+| `note.md` | 完整运行保留 finalized revision 原字节；partial 运行保留最新已提交 revision |
+| `note.png` | 与 note.md 对应的渲染图 |
 | `revisions/revision-NNN.md` | 每个成功 revision 的 markdown 原字节, 不参与 cleanup, 保证可从磁盘独立重建 |
 | `assets/figures/figure-NNN.png` | `capture_figure` 物化的源图裁片, 被 markdown 引用, 不参与 cleanup |
 | `run.json` | 运行 manifest (`RunManifest`) |

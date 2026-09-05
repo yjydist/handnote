@@ -3,10 +3,13 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
+import { parseSrcset } from "srcset";
 import { HandnoteError } from "./errors.ts";
-import type { NoteMarkdown } from "./markdown.ts";
-import { noteMarkdownToHtml } from "./markdown.ts";
-import type { RenderedSemanticEvidence } from "./markdown-semantics.ts";
+import {
+  type CompiledNote,
+  MarkdownValidationError,
+  type NoteStructure,
+} from "./markdown.ts";
 import { atomicWrite } from "./utils.ts";
 
 export interface LayoutWarning {
@@ -26,19 +29,7 @@ export interface RenderResult {
   width: number;
   height: number;
   warnings: LayoutWarning[];
-  structure: {
-    headings: number;
-    blocks: number;
-    tables: number;
-    equations: number;
-    diagrams: number;
-    figures: number;
-  };
-}
-
-export interface RenderDocumentResult {
-  render: RenderResult;
-  semanticEvidence: RenderedSemanticEvidence;
+  structure: NoteStructure;
 }
 
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -81,26 +72,18 @@ async function katexCss(): Promise<string> {
   return css;
 }
 
-async function buildHtml(
-  note: NoteMarkdown,
-  runDirectory: string,
-  width: number,
-): Promise<string> {
-  const [font, math, mermaid, body] = await Promise.all([
+async function buildHtml(note: CompiledNote, width: number): Promise<string> {
+  const [font, math, mermaid] = await Promise.all([
     fontCss(),
     katexCss(),
     readFile(
       resolve(packageRoot, "node_modules/mermaid/dist/mermaid.min.js"),
       "utf8",
     ),
-    noteMarkdownToHtml(note, { runDirectory }),
   ]);
-  const titleMatch = note.tree.children.find(
-    (node) => node.type === "heading" && node.depth === 1,
-  );
-  const title = titleMatch ? "page has-title" : "page";
+  const title = note.hasTitle ? "page has-title" : "page";
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=${width}"><style>${font}${math}
-*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}:where(.page)>*{margin:18px 0}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre:not(.mermaid){white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}</style></head><body><main class="${title}">${body}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
+*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}:where(.page)>*{margin:18px 0}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre:not(.mermaid){white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}</style></head><body><main class="${title}">${note.html}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
 }
 
 export function isAllowedRenderRequest(
@@ -119,16 +102,17 @@ async function screenshotTall(
   width: number;
   height: number;
   warnings: LayoutWarning[];
-  semanticEvidence: RenderedSemanticEvidence;
 }> {
   const context = await browser.newContext({
     viewport: { width, height: 900 },
     deviceScaleFactor: 1,
   });
   const documentUrl = pathToFileURL(htmlPath).href;
+  const blockedRequests = new Set<string>();
   await context.route("**/*", async (route) => {
     const url = route.request().url();
     if (isAllowedRenderRequest(url, documentUrl)) return route.continue();
+    blockedRequests.add(url);
     return route.abort();
   });
   const page = await context.newPage();
@@ -149,157 +133,6 @@ async function screenshotTall(
       ),
     );
     const warnings: LayoutWarning[] = [];
-    const effectivelyVisible = (
-      element: Element,
-      areaRequired: boolean,
-    ): boolean => {
-      const rect = element.getBoundingClientRect();
-      return (
-        element.checkVisibility({
-          checkOpacity: true,
-          checkVisibilityCSS: true,
-        }) &&
-        (areaRequired
-          ? rect.width > 0 && rect.height > 0
-          : rect.width > 0 || rect.height > 0)
-      );
-    };
-    const hasVisiblePaint = (paint: string): boolean =>
-      paint !== "none" &&
-      paint !== "transparent" &&
-      !/(?:^rgba\([^)]*,|\/)\s*0(?:\.0+)?%?\s*\)$/.test(paint);
-    const mermaidLabelText = (node: Node): string => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const parent = node.parentElement;
-        if (!parent || !effectivelyVisible(parent, true)) return "";
-        const style = getComputedStyle(parent);
-        const painted =
-          parent instanceof SVGElement
-            ? (hasVisiblePaint(style.fill) &&
-                Number.parseFloat(style.fillOpacity) > 0) ||
-              (hasVisiblePaint(style.stroke) &&
-                Number.parseFloat(style.strokeOpacity) > 0 &&
-                Number.parseFloat(style.strokeWidth) > 0)
-            : hasVisiblePaint(
-                style.getPropertyValue("-webkit-text-fill-color") ||
-                  style.color,
-              );
-        return painted ? (node.textContent ?? "") : "";
-      }
-      return Array.from(node.childNodes, mermaidLabelText).join("");
-    };
-    const mermaidBlocks = Array.from(
-      document.querySelectorAll("pre.mermaid"),
-      (block) => {
-        const renderError = block.querySelector(".error-icon") !== null;
-        const labels = renderError
-          ? []
-          : Array.from(
-              block.querySelectorAll<SVGElement>("svg text, svg foreignObject"),
-            )
-              .filter(
-                (element) =>
-                  (element.tagName.toLowerCase() === "foreignobject" ||
-                    !element.closest("foreignObject")) &&
-                  effectivelyVisible(element, true),
-              )
-              .map((element) => {
-                const rect = element.getBoundingClientRect();
-                return {
-                  text: mermaidLabelText(element),
-                  top: rect.top,
-                  left: rect.left,
-                };
-              })
-              .filter((label) => label.text.trim().length > 0)
-              .sort(
-                (left, right) => left.top - right.top || left.left - right.left,
-              )
-              .map((label) => label.text);
-        const visibleGraphic = Array.from(
-          block.querySelectorAll<SVGElement>(
-            "svg path, svg rect, svg circle, svg ellipse, svg line, svg polyline, svg polygon",
-          ),
-        ).some((element) => {
-          if (element.closest("defs, marker, clipPath, mask, pattern, symbol"))
-            return false;
-          if (!effectivelyVisible(element, false)) return false;
-          const style = getComputedStyle(element);
-          const fillVisible =
-            style.fill !== "none" &&
-            style.fill !== "transparent" &&
-            Number.parseFloat(style.fillOpacity) > 0;
-          const strokeVisible =
-            style.stroke !== "none" &&
-            style.stroke !== "transparent" &&
-            Number.parseFloat(style.strokeOpacity) > 0 &&
-            Number.parseFloat(style.strokeWidth) > 0;
-          return fillVisible || strokeVisible;
-        });
-        const forbidden =
-          block.querySelector("a[href], img, image") !== null ||
-          Array.from(block.querySelectorAll("*")).some((element) =>
-            Array.from(element.attributes).some((attribute) =>
-              attribute.name.toLowerCase().startsWith("on"),
-            ),
-          );
-        return {
-          forbidden,
-          labels,
-          visibleContent: renderError || labels.length > 0 || visibleGraphic,
-        };
-      },
-    );
-    const mermaidTextBlocks = mermaidBlocks.map((block) => block.labels);
-    const mermaidVisibleBlocks = mermaidBlocks.map(
-      (block) => block.visibleContent,
-    );
-    const forbiddenMermaidContent = mermaidBlocks.some(
-      (block) => block.forbidden,
-    );
-    const mathPresentationText = (node: Node): string => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const parent = node.parentElement;
-        if (!parent) return "";
-        const style = getComputedStyle(parent);
-        const transparent = /(?:^rgba\([^)]*,|\/)\s*0(?:\.0+)?%?\s*\)$/.test(
-          style.color,
-        );
-        return style.visibility === "visible" && !transparent
-          ? (node.textContent ?? "")
-          : "";
-      }
-      if (
-        node instanceof Element &&
-        ["mphantom", "annotation", "annotation-xml"].includes(node.localName)
-      )
-        return "";
-      // KaTeX clips its accessible MathML; its box size is not glyph visibility.
-      return Array.from(node.childNodes, mathPresentationText).join("");
-    };
-    const mathTextBlocks = Array.from(
-      document.querySelectorAll<HTMLElement>(".katex, .katex-error"),
-    )
-      .filter((element) => !element.closest("pre.mermaid"))
-      .map((element) => {
-        if (element.classList.contains("katex-error"))
-          return element.textContent ?? "";
-        const semantics = element.querySelector("math > semantics");
-        const presentation = Array.from(semantics?.children ?? []).find(
-          (child) => child.tagName.toLowerCase() !== "annotation",
-        );
-        return presentation ? mathPresentationText(presentation) : "";
-      });
-    const imageCaptionBlocks = Array.from(document.querySelectorAll("img"))
-      .filter((element) => !element.closest("pre.mermaid"))
-      .map((element) => {
-        const figure = element.parentElement;
-        if (figure?.tagName !== "FIGURE") return "";
-        const caption = figure.querySelector(":scope > figcaption");
-        return caption && effectivelyVisible(caption, true)
-          ? (caption.textContent ?? "")
-          : "";
-      });
     const runtime = globalThis as typeof globalThis & {
       __handnoteMermaidError?: string;
     };
@@ -339,13 +172,6 @@ async function screenshotTall(
     )) {
       const rect = element.getBoundingClientRect();
       const id = element.dataset.hnId;
-      if (rect.width <= 0 || rect.height <= 0)
-        warnings.push({
-          code: "zero_size",
-          message: `Block ${id} has zero size`,
-          blocking: true,
-          ...(id ? { elementId: id } : {}),
-        });
       if (rect.left < 0 || rect.right > width + 1)
         warnings.push({
           code: "clipped",
@@ -372,24 +198,49 @@ async function screenshotTall(
       width,
       height,
       warnings,
-      semanticEvidence: {
-        forbiddenMermaidContent,
-        mermaidTextBlocks,
-        mermaidVisibleBlocks,
-        mathTextBlocks,
-        imageCaptionBlocks,
-      },
     };
   });
+  const media = await page
+    .locator("img, image, video, audio, source, iframe, object, embed")
+    .evaluateAll((elements) =>
+      elements.flatMap((element) =>
+        ["src", "href", "xlink:href", "poster", "data"]
+          .map((name) => element.getAttribute(name))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+  const sourceSets = await page
+    .locator("[srcset]")
+    .evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute("srcset") ?? ""),
+    );
+  media.push(
+    ...sourceSets.flatMap((value) =>
+      parseSrcset(value).map((candidate) => candidate.url),
+    ),
+  );
+  if (blockedRequests.size > 0 || media.some((url) => !url.startsWith("data:")))
+    throw new MarkdownValidationError([
+      {
+        code: "external_resource",
+        message:
+          "Rendered content requires non-inline media; use captured local figures instead",
+      },
+    ]);
   const segmentHeight = 12_000;
   if (result.height <= segmentHeight) {
-    await page.screenshot({ path: imagePath, fullPage: true });
+    await page.screenshot({
+      path: imagePath,
+      fullPage: true,
+      clip: { x: 0, y: 0, width, height: result.height },
+    });
   } else {
     const parts: Array<{ input: Buffer; top: number; left: number }> = [];
     for (let y = 0; y < result.height; y += segmentHeight) {
       const height = Math.min(segmentHeight, result.height - y);
       const input = await page.screenshot({
         type: "png",
+        fullPage: true,
         clip: { x: 0, y, width, height },
       });
       parts.push({ input, top: y, left: 0 });
@@ -412,18 +263,18 @@ async function screenshotTall(
 }
 
 export async function renderDocument(
-  note: NoteMarkdown,
+  note: CompiledNote,
   runDirectory: string,
   revision: number,
   width: number,
-): Promise<RenderDocumentResult> {
-  const warnings: LayoutWarning[] = [...note.mathWarnings];
+): Promise<RenderResult> {
+  const warnings: LayoutWarning[] = [...note.warnings];
   const directory = `${runDirectory}/intermediate/revisions`;
   const htmlPath = `${directory}/revision-${String(revision).padStart(3, "0")}.html`;
   const imagePath = `${directory}/revision-${String(revision).padStart(3, "0")}.png`;
   let browser: Browser | undefined;
   try {
-    const html = await buildHtml(note, runDirectory, width);
+    const html = await buildHtml(note, width);
     await atomicWrite(htmlPath, html);
     browser = await chromium.launch({ headless: true });
     const screenshot = await screenshotTall(
@@ -434,18 +285,19 @@ export async function renderDocument(
     );
     warnings.push(...screenshot.warnings);
     return {
-      render: {
-        htmlPath,
-        imagePath,
-        width: screenshot.width,
-        height: screenshot.height,
-        warnings,
-        structure: note.structure,
-      },
-      semanticEvidence: screenshot.semanticEvidence,
+      htmlPath,
+      imagePath,
+      width: screenshot.width,
+      height: screenshot.height,
+      warnings,
+      structure: note.structure,
     };
   } catch (error) {
-    if (error instanceof HandnoteError) throw error;
+    if (
+      error instanceof HandnoteError ||
+      error instanceof MarkdownValidationError
+    )
+      throw error;
     const code = (error as NodeJS.ErrnoException).code;
     if (
       code &&

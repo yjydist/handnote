@@ -31,7 +31,7 @@ export function createReviseNoteTool(
             "No revision exists; use write_note for the first revision",
           );
         try {
-          return await commitNoteDraft(context, runtime, input);
+          return await commitNoteDraft(context, input);
         } catch (error) {
           return runtime.fatal(error);
         }

@@ -5,14 +5,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import remarkParse from "remark-parse";
 import sharp from "sharp";
-import { unified } from "unified";
 import { emptyRevisionAudit } from "../src/document.ts";
-import type { NoteMarkdown } from "../src/markdown.ts";
-import { parseNoteMarkdown } from "../src/markdown.ts";
+import { compileNoteMarkdown } from "../src/markdown.ts";
 import { isAllowedRenderRequest, renderDocument } from "../src/renderer.ts";
 import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
@@ -54,49 +49,6 @@ const fakeRender = (
 });
 
 describe("renderer", () => {
-  test("keeps Mermaid math separate from body math evidence", async () => {
-    const directory = await temporary();
-    const note = await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n a["$$x$$"] --> b[Done]\n```\n\nValue $y$.',
-      { runDirectory: directory },
-    );
-    const { render, semanticEvidence } = await renderDocument(
-      note,
-      directory,
-      1,
-      700,
-    );
-    expect(render.warnings).toEqual([]);
-    expect(semanticEvidence.mathTextBlocks).toEqual(["y"]);
-    expect(semanticEvidence.mermaidTextBlocks).toEqual([["x", "Done"]]);
-  });
-
-  test("extracts math operands without phantom or transparent descendants", async () => {
-    const directory = await temporary();
-    const cases = [
-      [String.raw`\phantom{x}`, ""],
-      [String.raw`\hphantom{x}`, ""],
-      [String.raw`\vphantom{x}`, ""],
-      [String.raw`\phantom{a+\hphantom{b}+\textcolor{red}{c}}`, ""],
-      [String.raw`a+\phantom{x}+b`, "a++b"],
-      [String.raw`\textcolor{transparent}{x}`, ""],
-      [String.raw`\textcolor{#00000000}{x}`, ""],
-      [String.raw`\textcolor{#00000080}{x}`, "x"],
-      [String.raw`\textcolor{red}{x}`, "x"],
-      [String.raw`\textcolor{transparent}{a\textcolor{red}{b}c}`, "b"],
-      [String.raw`\smash{x}`, "x"],
-      [String.raw`\frac{x^2}{y_1}`, "x2y1"],
-      [String.raw`\notACommand{`, String.raw`\notACommand{`],
-    ] as const;
-    const markdown = cases
-      .flatMap(([formula]) => [`$${formula}$`, `$$\n${formula}\n$$`])
-      .join("\n\n");
-    const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
-    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
-    expect(semanticEvidence.mathTextBlocks).toEqual(
-      cases.flatMap(([, expected]) => [expected, expected]),
-    );
-  }, 30_000);
   test("renders self-contained Chinese HTML, KaTeX fallback, Mermaid, table, and figure", async () => {
     const directory = await temporary();
     const source = `${directory}/source.png`;
@@ -139,15 +91,16 @@ flowchart TD
 
 ${figureMarkdown}
 `;
-    const note = await parseNoteMarkdown(markdown, { runDirectory: directory });
-    const { render: result, semanticEvidence } = await renderDocument(
-      note,
-      directory,
-      1,
-      900,
-    );
+    const note = await compileNoteMarkdown(markdown, {
+      runDirectory: directory,
+    });
+    const result = await renderDocument(note, directory, 1, 900);
     expect(result.width).toBe(900);
     expect(result.height).toBeGreaterThan(0);
+    expect(await sharp(result.imagePath).metadata()).toMatchObject({
+      width: 900,
+      height: result.height,
+    });
     expect(result.structure).toEqual({
       headings: 2,
       blocks: 8,
@@ -155,13 +108,6 @@ ${figureMarkdown}
       equations: 2,
       diagrams: 1,
       figures: 1,
-    });
-    expect(semanticEvidence).toEqual({
-      forbiddenMermaidContent: false,
-      mermaidTextBlocks: [["开始", "标签", "结束"]],
-      mermaidVisibleBlocks: [true],
-      mathTextBlocks: ["x2y", "\\notACommand{"],
-      imageCaptionBlocks: ["原图"],
     });
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),
@@ -176,7 +122,7 @@ ${figureMarkdown}
     expect(html).not.toMatch(/<(?:script|img)[^>]+src=["']https?:/i);
     expect(html).not.toMatch(/<link[^>]+href=["']https?:/i);
     expect(html).toContain(
-      '<div data-hn-id="hn-0005"><span class="katex-display">',
+      '<div data-hn-id="block-5"><span class="katex-display">',
     );
 
     const browser = await chromium.launch({ headless: true });
@@ -237,10 +183,10 @@ ${figureMarkdown}
     const root = await temporary();
     const runDirectory = `${root}/output#fragment`;
     await mkdir(runDirectory);
-    const note = await parseNoteMarkdown(simpleMarkdown(), {
+    const note = await compileNoteMarkdown(simpleMarkdown(), {
       runDirectory,
     });
-    const { render: result } = await renderDocument(note, runDirectory, 1, 700);
+    const result = await renderDocument(note, runDirectory, 1, 700);
     expect(result.width).toBe(700);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 30_000);
@@ -329,16 +275,11 @@ ${figureMarkdown}
 
   test("reports Mermaid runtime failures as blocking warnings", async () => {
     const directory = await temporary();
-    const note = await parseNoteMarkdown(
+    const note = await compileNoteMarkdown(
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const { render: result, semanticEvidence } = await renderDocument(
-      note,
-      directory,
-      1,
-      700,
-    );
+    const result = await renderDocument(note, directory, 1, 700);
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -347,13 +288,6 @@ ${figureMarkdown}
         }),
       ]),
     );
-    expect(semanticEvidence).toEqual({
-      forbiddenMermaidContent: false,
-      mermaidTextBlocks: [[]],
-      mermaidVisibleBlocks: [true],
-      mathTextBlocks: [],
-      imageCaptionBlocks: [],
-    });
   }, 30_000);
 
   test("blocks non-file browser requests during rendering", async () => {
@@ -365,200 +299,22 @@ ${figureMarkdown}
     const port = (server.address() as { port: number }).port;
     const probeUrl = `http://127.0.0.1:${port}/probe`;
     const markdown = "# 测试笔记\n";
-    const tree = unified()
-      .use(remarkParse)
-      .use(remarkGfm)
-      .use(remarkMath)
-      .parse(markdown) as NoteMarkdown["tree"];
-    tree.children.push({
-      type: "resource-probe",
-      data: { hName: "iframe", hProperties: { src: probeUrl } },
-      children: [],
-    } as never);
-    const note: NoteMarkdown = {
-      markdown,
-      tree,
-      structure: {
-        headings: 1,
-        blocks: 2,
-        tables: 0,
-        equations: 0,
-        diagrams: 0,
-        figures: 0,
-      },
-      mathWarnings: [],
-    };
+    const note = await compileNoteMarkdown(markdown, {
+      runDirectory: directory,
+    });
+    note.html += `<iframe src="${probeUrl}"></iframe>`;
     try {
-      const { render: result } = await renderDocument(note, directory, 1, 700);
-      expect(result.width).toBe(700);
-      expect(await Bun.file(result.imagePath).exists()).toBe(true);
-      expect(await Bun.file(result.htmlPath).text()).toContain(probeUrl);
+      await expect(
+        renderDocument(note, directory, 1, 700),
+      ).rejects.toMatchObject({
+        issues: [expect.objectContaining({ code: "external_resource" })],
+      });
       expect(requests).toBe(0);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
-  }, 30_000);
-
-  test("collects only effectively visible Mermaid labels", async () => {
-    const directory = await temporary();
-    const note = await parseNoteMarkdown(
-      [
-        "```mermaid",
-        "flowchart TD",
-        '  shown["Shown"]',
-        '  opacity["Opacity"]',
-        '  hidden["Hidden"]',
-        '  absent["Absent"]',
-        '  partial["Partial"]',
-        "  classDef opacityClass opacity:0",
-        "  classDef hiddenClass visibility:hidden",
-        "  classDef absentClass display:none",
-        "  classDef partialClass opacity:0.5",
-        "  class opacity opacityClass",
-        "  class hidden hiddenClass",
-        "  class absent absentClass",
-        "  class partial partialClass",
-        "```",
-      ].join("\n"),
-      { runDirectory: directory },
-    );
-    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
-
-    expect(semanticEvidence).toMatchObject({
-      forbiddenMermaidContent: false,
-      mermaidTextBlocks: [["Shown", "Partial"]],
-      mermaidVisibleBlocks: [true],
-    });
-  }, 30_000);
-
-  test("collects only painted Mermaid text in HTML and SVG labels", async () => {
-    const directory = await temporary();
-    for (const htmlLabels of [true, false]) {
-      const themeCSS = [
-        ".mixed strong {color:red!important;}",
-        '.mixed tspan[font-weight="bold"] {fill:red!important;}',
-        ".zeroFill text,.zeroFill tspan {fill-opacity:0!important;}",
-        ".paintTransparent text,.paintTransparent tspan {fill:transparent!important;}",
-        ".outlined text,.outlined tspan {fill:none!important;stroke:red!important;stroke-width:1px!important;}",
-      ].join(" ");
-      const note = await parseNoteMarkdown(
-        [
-          "```mermaid",
-          `%%{init: ${JSON.stringify({ htmlLabels, themeCSS })}}%%`,
-          "flowchart TD",
-          "a[Hidden]:::transparent",
-          "b[Partial]:::partial",
-          'c["`Hidden **Visible** Hidden`"]:::mixed',
-          "d[ZeroFill]:::zeroFill",
-          "e[TransparentFill]:::paintTransparent",
-          "f[Outlined]:::outlined",
-          "g[Ordinary]",
-          "h[AlphaZero]:::alphaZero",
-          "classDef transparent color:transparent",
-          "classDef partial color:#ff000080",
-          "classDef mixed color:transparent",
-          "classDef alphaZero color:#ff000000",
-          "```",
-        ].join("\n"),
-        { runDirectory: directory },
-      );
-      const { render, semanticEvidence } = await renderDocument(
-        note,
-        directory,
-        htmlLabels ? 1 : 2,
-        1000,
-      );
-      const browser = await chromium.launch({ headless: true });
-      try {
-        const page = await browser.newPage();
-        await page.goto(pathToFileURL(render.htmlPath).href);
-        await page.waitForFunction(
-          () =>
-            (globalThis as typeof globalThis & { __handnoteReady?: boolean })
-              .__handnoteReady === true,
-        );
-        const styles = await page.evaluate(() => {
-          const paint = (selector: string) => {
-            const element = document.querySelector(selector);
-            if (!element) throw new Error(`Missing label: ${selector}`);
-            const style = getComputedStyle(element);
-            return {
-              color: style.color,
-              fill: style.fill,
-              fillOpacity: style.fillOpacity,
-              stroke: style.stroke,
-              strokeWidth: style.strokeWidth,
-            };
-          };
-          const html = document.querySelector(".transparent foreignObject");
-          const leaf = html ? "p" : ".text-inner-tspan";
-          return {
-            html: Boolean(html),
-            transparent: paint(`.transparent ${leaf}`),
-            partial: paint(`.partial ${leaf}`),
-            visible: paint(
-              html ? ".mixed strong" : '.mixed tspan[font-weight="bold"]',
-            ),
-            zeroFill: paint(`.zeroFill ${leaf}`),
-            transparentFill: paint(`.paintTransparent ${leaf}`),
-            outlined: paint(`.outlined ${leaf}`),
-          };
-        });
-        expect(styles.html).toBe(htmlLabels);
-        const property = htmlLabels ? "color" : "fill";
-        expect(styles.transparent[property]).toBe("rgba(0, 0, 0, 0)");
-        expect(styles.partial[property]).toBe("rgba(255, 0, 0, 0.5)");
-        expect(styles.visible[property]).toBe("rgb(255, 0, 0)");
-        if (!htmlLabels) {
-          expect(styles.zeroFill.fillOpacity).toBe("0");
-          expect(styles.transparentFill.fill).toBe("rgba(0, 0, 0, 0)");
-          expect(styles.outlined).toMatchObject({
-            fill: "none",
-            stroke: "rgb(255, 0, 0)",
-            strokeWidth: "1px",
-          });
-        }
-      } finally {
-        await browser.close();
-      }
-      expect(render.warnings).toEqual([]);
-      expect(
-        semanticEvidence.mermaidTextBlocks[0]?.map((text) => text.trim()),
-      ).toEqual(
-        htmlLabels
-          ? [
-              "Partial",
-              "Visible",
-              "ZeroFill",
-              "TransparentFill",
-              "Outlined",
-              "Ordinary",
-            ]
-          : ["Partial", "Visible", "Outlined", "Ordinary"],
-      );
-    }
-  }, 30_000);
-
-  test("reports forbidden content found only in rendered Mermaid output", async () => {
-    const directory = await temporary();
-    const note = await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n  a["Safe"]\n```',
-      { runDirectory: directory },
-    );
-    const mermaid = note.tree.children.find(
-      (node) => node.type === "code" && node.lang === "mermaid",
-    );
-    if (!mermaid || mermaid.type !== "code")
-      throw new Error("missing Mermaid node");
-    // Deliberately bypass source validation to exercise the rendered-DOM guard.
-    mermaid.value =
-      "flowchart TD\n  a[\"<img src='data:image/png;base64,AAAA'>\"]";
-
-    const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
-    expect(semanticEvidence.forbiddenMermaidContent).toBe(true);
-    expect(semanticEvidence.imageCaptionBlocks).toEqual([]);
   }, 30_000);
 
   test("allows only the exact render document file URL and data URLs", () => {
@@ -713,4 +469,73 @@ describe("finalization state machine", () => {
     expect(finalizeFirst.state.finalizedRevision).toBe(1);
     expect(finalizeFirst.state.revision?.number).toBe(1);
   }, 60_000);
+});
+
+describe("standard rendering boundaries", () => {
+  test("renders local HTML picture candidates without external resources", async () => {
+    const runDirectory = await temporary();
+    await mkdir(`${runDirectory}/assets/figures`, { recursive: true });
+    await sharp({
+      create: { width: 40, height: 30, channels: 3, background: "red" },
+    })
+      .png()
+      .toFile(`${runDirectory}/assets/figures/a.png`);
+    const local = "assets/figures/a.png";
+    const note = await compileNoteMarkdown(
+      `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
+      { runDirectory },
+    );
+    const render = await renderDocument(note, runDirectory, 1, 700);
+    expect(render.warnings).toEqual([]);
+    expect((await sharp(render.imagePath).metadata()).width).toBe(700);
+  }, 30_000);
+
+  test("Mermaid strict mode accepts links while external diagram media is a repairable resource error", async () => {
+    const runDirectory = await temporary();
+    const linked = await compileNoteMarkdown(
+      '```mermaid\nflowchart TD\n a["Safe <b>label</b>"]\n click a "https://example.test"\n```',
+      { runDirectory },
+    );
+    const render = await renderDocument(linked, runDirectory, 1, 700);
+    expect(render.warnings).toEqual([]);
+    const external = await compileNoteMarkdown(
+      '```mermaid\nflowchart TD\n a@{ img: "https://example.test/remote.png", label: "Remote" }\n```',
+      { runDirectory },
+    );
+    await expect(
+      renderDocument(external, runDirectory, 2, 700),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "external_resource" })],
+    });
+  }, 30_000);
+
+  test("preserves configured screenshot width when content overflows", async () => {
+    const directory = await temporary();
+    const note = await compileNoteMarkdown(`$${"x".repeat(250)}$`, {
+      runDirectory: directory,
+    });
+    const render = await renderDocument(note, directory, 1, 700);
+    expect(
+      render.warnings.some(
+        (warning) => warning.blocking && warning.code.includes("overflow"),
+      ),
+    ).toBe(true);
+    expect((await sharp(render.imagePath).metadata()).width).toBe(700);
+  }, 30_000);
+
+  test("stitches long images at the configured width", async () => {
+    const directory = await temporary();
+    const note = await compileNoteMarkdown(
+      Array.from({ length: 260 }, (_, index) => `Paragraph ${index}.`).join(
+        "\n\n",
+      ),
+      { runDirectory: directory },
+    );
+    const render = await renderDocument(note, directory, 1, 700);
+    const metadata = await sharp(render.imagePath).metadata();
+    expect(render.height).toBeGreaterThan(12_000);
+    expect(metadata.width).toBe(700);
+    expect(metadata.height).toBe(render.height);
+    expect(render.warnings).toEqual([]);
+  }, 30_000);
 });

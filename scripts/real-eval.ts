@@ -5,7 +5,7 @@ import { basename, extname, resolve } from "node:path";
 import { Command } from "commander";
 import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
-import { parseNoteMarkdown } from "../src/markdown.ts";
+import { compileNoteMarkdown } from "../src/markdown.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
 import { atomicWrite, sha256File } from "../src/utils.ts";
 
@@ -204,7 +204,7 @@ export async function inspectEvalAttempt(
   if (hasDocument && hasImage && hasRevision && manifest.final) {
     try {
       const markdown = await readFile(documentPath, "utf8");
-      await parseNoteMarkdown(markdown, {
+      await compileNoteMarkdown(markdown, {
         runDirectory: manifest.runDirectory,
       });
       schemaValid = true;

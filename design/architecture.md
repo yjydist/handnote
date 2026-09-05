@@ -34,10 +34,7 @@ flowchart TB
         cli["cli.ts"]
     end
 
-    markdown --> document
     markdown --> renderer
-    markdown --> utils
-    markdown --> errors
     image --> document
     image --> errors
     renderer --> markdown

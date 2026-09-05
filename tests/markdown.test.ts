@@ -1,15 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
-import {
-  type MarkdownIssue,
-  MarkdownValidationError,
-  maxMarkdownLength,
-  noteMarkdownToHtml,
-  parseNoteMarkdown,
-} from "../src/markdown.ts";
-import { analyzeMarkdownSemantics } from "../src/markdown-semantics.ts";
+import { compileNoteMarkdown, maxMarkdownLength } from "../src/markdown.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -24,10 +17,9 @@ afterEach(async () => {
       .map((path) => rm(path, { recursive: true, force: true })),
   );
 });
-
-async function figureFixture(runDirectory: string): Promise<string> {
-  await mkdir(`${runDirectory}/assets/figures`, { recursive: true });
-  const path = `${runDirectory}/assets/figures/figure-001.png`;
+async function figureFixture(directory: string): Promise<string> {
+  await mkdir(`${directory}/assets/figures`, { recursive: true });
+  const path = `${directory}/assets/figures/figure-001.png`;
   await sharp({
     create: { width: 40, height: 30, channels: 3, background: "#d0e4f2" },
   })
@@ -36,457 +28,190 @@ async function figureFixture(runDirectory: string): Promise<string> {
   return path;
 }
 
-const expectIssues = async (
-  markdown: string,
-  runDirectory: string,
-  codes: string[],
-): Promise<MarkdownIssue[]> => {
-  let caught: unknown;
-  try {
-    await parseNoteMarkdown(markdown, { runDirectory });
-  } catch (error) {
-    caught = error;
-  }
-  expect(caught).toBeInstanceOf(MarkdownValidationError);
-  const issues = (caught as MarkdownValidationError).issues;
-  expect(issues.map((issue) => issue.code)).toEqual(codes);
-  return issues;
-};
+describe("Markdown compilation", () => {
+  test("supports GFM links, footnotes and sanitized HTML with working fragments", async () => {
+    const markdown = `# Note
 
-describe("parseNoteMarkdown", () => {
-  test("parses a strict GFM document and counts its structure", async () => {
-    const runDirectory = await temporary();
-    await figureFixture(runDirectory);
-    const note = await parseNoteMarkdown(
-      `# 标题
+[link](https://example.test) and [reference][ref], https://example.test and note[^one].
 
-段落一 $x^2$ 内容。
+[ref]: https://example.test/reference
+[^one]: Footnote **body**.
 
-| 列一 | 列二 |
-| --- | --- |
-| 1 | 2 |
+<a href="#target">Jump</a><b id="target" onclick="alert(1)" style="color:red">Safe</b>
+<script>alert('script-body')</script>
+<a href="javascript:alert(1)">Unsafe URL</a>
 
-\`\`\`mermaid
-flowchart TD
-  a --> b
-\`\`\`
+- [x] done
 
-$$
-\\frac{x^2}{y}
-$$
-
-![说明](assets/figures/figure-001.png)
-`,
-      { runDirectory },
-    );
-    expect(note.structure).toEqual({
-      headings: 1,
-      blocks: 6,
-      tables: 1,
-      equations: 2,
-      diagrams: 1,
-      figures: 1,
+| A | B |
+| - | - |
+| a | b |
+`;
+    const note = await compileNoteMarkdown(markdown, {
+      runDirectory: await temporary(),
     });
-    expect(note.mathWarnings).toEqual([]);
+    expect(note.markdown).toBe(markdown);
+    expect(note.html).toContain('href="https://example.test/reference"');
+    expect(note.html).toContain('href="#user-content-target"');
+    expect(note.html).toContain('id="user-content-target"');
+    expect(note.html).toContain('href="#user-content-user-content-fn-one"');
+    expect(note.html).toContain('id="user-content-user-content-fn-one"');
+    expect(note.html).toContain('href="#user-content-user-content-fnref-one"');
+    expect(note.html).toContain(
+      'aria-describedby="user-content-footnote-label"',
+    );
+    expect(note.html).toContain('id="user-content-footnote-label"');
+    expect(note.html).toContain("<strong>body</strong>");
+    expect(note.html).toContain('type="checkbox"');
+    expect(note.html).not.toMatch(
+      /<script|script-body|onclick|style=|javascript:/,
+    );
+    expect(note.structure).toMatchObject({ headings: 2, tables: 1 });
   });
 
-  test("rejects raw HTML, links, autolinks, definitions, and frontmatter", async () => {
-    const runDirectory = await temporary();
-    await expectIssues("", runDirectory, ["empty_document"]);
-    await expectIssues("<div>hi</div>\n\n正文。", runDirectory, [
-      "raw_html",
-    ]).then((issues) => expect(issues[0]?.line).toBe(1));
-    await expectIssues("[点击](https://example.test)", runDirectory, [
-      "link_not_allowed",
-    ]);
-    await expectIssues("访问 https://example.test 查看", runDirectory, [
-      "link_not_allowed",
-    ]);
-    await expectIssues("[ref]: https://example.test", runDirectory, [
-      "link_not_allowed",
-    ]);
-    await expectIssues("---\ntitle: x\n---\n\n正文。", runDirectory, [
-      "frontmatter_unsupported",
-    ]);
-    await expectIssues("", runDirectory, ["empty_document"]);
-    await expectIssues("   \n\n", runDirectory, ["empty_document"]);
+  test("inlines Markdown, reference and HTML images through the same resource boundary", async () => {
+    const directory = await temporary();
+    const path = await figureFixture(directory);
+    const markdown =
+      '![Caption](assets/figures/figure-001.png)\n\n![Reference][image]\n\n[image]: assets/figures/figure-001.png\n\n<p><img src="assets/figures/figure-001.png" alt="HTML" onerror="alert(1)"></p>\n\nInline ![alt](assets/figures/figure-001.png) text.';
+    const note = await compileNoteMarkdown(markdown, {
+      runDirectory: directory,
+    });
+    const uri = `data:image/png;base64,${Buffer.from(await Bun.file(path).arrayBuffer()).toString("base64")}`;
+    expect(note.html.split(uri)).toHaveLength(5);
+    expect(note.html).toContain("<figcaption>Caption</figcaption>");
+    expect(note.html).toContain("<figcaption>Reference</figcaption>");
+    expect(note.html).toContain("<figcaption>HTML</figcaption>");
+    expect(note.html).not.toContain("<figcaption>alt</figcaption>");
+    expect(note.html).not.toContain("onerror");
+    expect(note.structure.figures).toBe(4);
   });
 
-  test("rejects syntax-only Markdown without semantic content", async () => {
+  test("validates every HTML picture candidate before inlining srcset", async () => {
     const runDirectory = await temporary();
-    for (const markdown of [
-      "```\n```",
-      "```ts\n```",
-      "#",
-      "-",
-      "| |\n| - |",
-      "***",
-    ])
-      await expectIssues(markdown, runDirectory, ["empty_document"]);
-
-    for (const markdown of [
-      "```ts\nconst value = 1;\n```",
-      "Only text.",
-      "$x$",
-      "- [x] task",
-      "```mermaid\nflowchart TD\n```",
-    ])
-      await parseNoteMarkdown(markdown, { runDirectory });
-  });
-
-  test("discarded table cells do not make an empty document nonempty", async () => {
-    const runDirectory = await temporary();
-    await figureFixture(runDirectory);
-    for (const hidden of [
-      "Hidden",
-      "$x$",
-      "![Hidden](assets/figures/figure-001.png)",
-    ])
-      await expectIssues(`| |\n| - |\n| | ${hidden} |`, runDirectory, [
-        "empty_document",
-      ]);
-  });
-
-  test("table semantics preserve short rows and tables without alignment", async () => {
-    const runDirectory = await temporary();
-    const note = await parseNoteMarkdown(
-      "| A | B |\n| - | - |\n| C | D |\n| E |\n| F | G | Hidden |",
+    const path = await figureFixture(runDirectory);
+    const local = "assets/figures/figure-001.png";
+    const note = await compileNoteMarkdown(
+      `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
       { runDirectory },
     );
-    expect(analyzeMarkdownSemantics(note.tree).blocks).toEqual([
-      "A",
-      "B",
-      "C",
-      "D",
-      "E",
-      "F",
-      "G",
-    ]);
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain("<td>E</td>\n<td></td>");
-    expect(html).not.toContain("Hidden");
-    const table = note.tree.children[0];
-    if (table?.type !== "table") throw new Error("missing table");
-    delete table.align;
-    expect(analyzeMarkdownSemantics(note.tree).blocks).toEqual([
-      "A",
-      "B",
-      "C",
-      "D",
-      "E",
-      "F",
-      "G",
-      "Hidden",
-    ]);
-    expect(await noteMarkdownToHtml(note, { runDirectory })).toContain(
-      "<td>Hidden</td>",
-    );
-  });
-
-  test("rejects oversized markdown", async () => {
-    const runDirectory = await temporary();
-    await expectIssues("正".repeat(maxMarkdownLength + 1), runDirectory, [
-      "markdown_too_large",
-    ]);
-  });
-
-  test("rejects invalid and unknown image paths", async () => {
-    const runDirectory = await temporary();
-    await expectIssues("![x](https://example.test/a.png)", runDirectory, [
-      "invalid_image_path",
-    ]);
-    await expectIssues("![x](assets/figures/../escape.png)", runDirectory, [
-      "invalid_image_path",
-    ]);
-    await expectIssues("![x](assets/figures/missing.png)", runDirectory, [
-      "unknown_image",
-    ]);
-    await figureFixture(runDirectory);
-    const note = await parseNoteMarkdown(
-      "![x](assets/figures/figure-001.png)",
-      { runDirectory },
-    );
-    expect(note.structure.figures).toBe(1);
-  });
-
-  test("rejects every reference-style image form", async () => {
-    const runDirectory = await temporary();
-    for (const markdown of [
-      "![defined][figure]\n\n[figure]: assets/figures/figure-001.png",
-      "![undefined][figure]",
-      "![collapsed][]",
-      "![shortcut]",
+    const uri = `data:image/png;base64,${Buffer.from(await Bun.file(path).arrayBuffer()).toString("base64")}`;
+    expect(note.html).toContain(`srcset="${uri} 1x, ${uri} 2x"`);
+    for (const url of [
+      "https://example.test/remote.png",
+      "data:image/png;base64,YQ==",
+      "../source.png",
     ])
-      await expectIssues(markdown, runDirectory, ["invalid_image_syntax"]);
-    await parseNoteMarkdown("\\![escaped]", { runDirectory });
-  });
-
-  test("rejects footnote references and definitions as links", async () => {
-    const runDirectory = await temporary();
-    await expectIssues("正文[^1]。\n\n[^1]: 注释内容", runDirectory, [
-      "link_not_allowed",
-      "link_not_allowed",
-    ]);
-  });
-
-  test("rejects raw HTML inside mermaid blocks", async () => {
-    const runDirectory = await temporary();
-    const cases = [
-      'a["<img src="data:image/png;base64,AAAA">"] --> b',
-      'a["<span>text</span>"] --> b',
-      'a["line<br/>break"] --> b',
-      'a["<IMG\n  src="data:image/png;base64,AAAA">"] --> b',
-      'a["<img/src=data:image/png;base64,AAAA>"] --> b',
-      "a[\"<IMG/\nSRC='data:image/png;base64,AAAA'>\"] --> b",
-      "a[\"<custom/title='x < y'>\"] --> b",
-      'a["<x.y>text</x.y>"] --> b',
-      "a[\"<X.Y/\nDATA-VALUE='x > y'>text</X.Y>\"] --> b",
-      'a["<x_y>text</x_y>"] --> b',
-      'a["<x@y>text</x@y>"] --> b',
-      'a["<x=y>text</x=y>"] --> b',
-      'a["orphan </custom.tag> close"] --> b',
-      "a[\"<a href='https://example.test'>x</a>\"] --> b",
-      'a["<!-- hidden -->text"] --> b',
-      'a["<!DOCTYPE html>text"] --> b',
-      'a["<![CDATA[text]]>"] --> b',
-      'a["<?processing instruction?>text"] --> b',
-    ];
-    for (const source of cases)
-      await expectIssues(
-        `前文。\n\n\`\`\`mermaid\nflowchart TD\n  ${source}\n\`\`\``,
-        runDirectory,
-        ["raw_html"],
-      ).then((issues) => {
-        expect(issues[0]?.line).toBe(3);
-        expect(issues[0]?.message).toContain("Mermaid");
+      await expect(
+        compileNoteMarkdown(
+          `<picture><source srcset="${local} 1x, ${url} 2x"><img src="${local}"></picture>`,
+          { runDirectory },
+        ),
+      ).rejects.toMatchObject({
+        issues: [expect.objectContaining({ code: "invalid_image_path" })],
       });
   });
 
-  test("rejects links, click directives, asset directives, and URLs inside mermaid blocks", async () => {
-    const runDirectory = await temporary();
-    await expectIssues(
-      '```mermaid\nflowchart TD\n  a --> b\n  click a "https://example.test"\n```',
-      runDirectory,
-      ["link_not_allowed"],
-    ).then((issues) => expect(issues[0]?.message).toContain("Mermaid"));
-    for (const directive of [
-      'click a "/local"',
-      "click a call callback()",
-      "click a callback",
-    ])
-      await expectIssues(
-        `\`\`\`mermaid\nflowchart TD\n  a --> b; ${directive}\n\`\`\``,
-        runDirectory,
-        ["link_not_allowed"],
-      );
-    await expectIssues(
-      '```mermaid\nflowchart TD\n  a["[label](https://example.test)"] --> b\n```',
-      runDirectory,
-      ["link_not_allowed"],
-    );
-    await expectIssues(
-      '```mermaid\nflowchart TD\n  a@{ img: "https://example.test/x.png" } --> b\n```',
-      runDirectory,
-      ["link_not_allowed"],
-    );
-    await expectIssues(
-      '```mermaid\nflowchart TD\n  a@{ img: "/local.png" } --> b\n```',
-      runDirectory,
-      ["link_not_allowed"],
-    );
-    for (const attribute of [
-      'IMG: "/local.png"',
-      '"img": "/local.png"',
-      "img",
-      "img, shape: diamond",
-      "ImG: '/local.png'",
-    ])
-      await expectIssues(
-        `\`\`\`mermaid\nflowchart TD\n  a@{ ${attribute} } --> b\n\`\`\``,
-        runDirectory,
-        ["link_not_allowed"],
-      );
-    await expectIssues(
-      "```mermaid\nflowchart TD\n  a[see https://example.test] --> b\n```",
-      runDirectory,
-      ["link_not_allowed"],
-    );
-    await parseNoteMarkdown(
-      "```mermaid\nflowchart TD\n  a[plain label] --> b\n```",
-      { runDirectory },
-    );
-    await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision" } --> b\n```',
-      { runDirectory },
-    );
-    await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n  a@{ shape: diamond, label: "Decision } \\"ok\\"" } --> b\n```',
-      { runDirectory },
-    );
-    await parseNoteMarkdown(
-      '```mermaid\nflowchart TD\n  a["A < B > C"] --> b\n  b["&lt;span&gt;text&lt;/span&gt;"] --> c\n```',
-      { runDirectory },
-    );
-    await parseNoteMarkdown("```mermaid\nflowchart TD\n  click --> node\n```", {
-      runDirectory,
+  test("rejects remote, missing and escaping images regardless of source syntax", async () => {
+    const directory = await temporary();
+    const outside = await temporary();
+    const outsideFigure = await figureFixture(outside);
+    await figureFixture(directory);
+    await symlink(outsideFigure, `${directory}/assets/figures/escape.png`);
+    for (const src of [
+      "https://example.test/image.png",
+      "//example.test/image.png",
+      "../source.png",
+      "assets/figures/escape.png",
+      "data:image/png;base64,YQ==",
+    ]) {
+      for (const markdown of [
+        `![alt](${src})`,
+        `![alt][ref]\n\n[ref]: ${src}`,
+        `<img src="${src}">`,
+      ]) {
+        await expect(
+          compileNoteMarkdown(markdown, { runDirectory: directory }),
+        ).rejects.toMatchObject({
+          issues: [expect.objectContaining({ code: "invalid_image_path" })],
+        });
+      }
+    }
+    await expect(
+      compileNoteMarkdown("![alt](assets/figures/missing.png)", {
+        runDirectory: directory,
+      }),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "missing_figure" })],
     });
-    for (const source of [
-      'a["literal; click a callback"] --> b',
-      '%% comment; click a "/local"\na --> b',
-      "a --> b; click --> node",
-    ])
-      await parseNoteMarkdown(
-        `\`\`\`mermaid\nflowchart TD\n  ${source}\n\`\`\``,
-        { runDirectory },
-      );
-    await expectIssues(
-      "```mermaid\nflowchart TD\n  click node callback\n```",
-      runDirectory,
-      ["link_not_allowed"],
+    const linked = await temporary();
+    await mkdir(`${linked}/assets`);
+    await symlink(`${outside}/assets/figures`, `${linked}/assets/figures`);
+    await expect(
+      compileNoteMarkdown("![alt](assets/figures/figure-001.png)", {
+        runDirectory: linked,
+      }),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "invalid_image_path" })],
+    });
+  });
+
+  test("uses library math and code conventions with nonblocking KaTeX fallback", async () => {
+    const note = await compileNoteMarkdown(
+      "$x$\n\n$$\ny^2\n$$\n\n```math\n\\frac{a}{b}\n```\n\n```MATH\nliteral\n```\n\n$\\notACommand{$\n\n```mermaid\nflowchart TD\n A --> B\n```\n\n```Mermaid\nliteral\n```",
+      { runDirectory: await temporary() },
     );
+    expect(note.structure).toMatchObject({ equations: 4, diagrams: 1 });
+    expect(note.html).toContain('class="katex"');
+    expect(note.html).toContain('class="katex-error"');
+    expect(note.html).toContain('class="language-MATH"');
+    expect(note.html).toContain('class="language-Mermaid"');
+    expect(note.html).toMatch(
+      /<div data-hn-id="[^"]+"><span class="katex-display">/,
+    );
+    expect(note.warnings).toEqual([
+      expect.objectContaining({
+        code: "equation_fallback",
+        blocking: false,
+        elementId: expect.any(String),
+      }),
+    ]);
   });
 
-  test("requires the lowercase mermaid fence name", async () => {
+  test("rejects only blank or oversized text at the syntax boundary", async () => {
     const runDirectory = await temporary();
-    for (const language of ["Mermaid", "MERMAID", "mErMaId"])
-      await expectIssues(
-        `\`\`\`${language}\nflowchart TD\n  a --> b\n\`\`\``,
-        runDirectory,
-        ["invalid_mermaid_fence"],
-      );
-  });
-
-  test("rejects math code fences with a located repair instruction", async () => {
-    const runDirectory = await temporary();
-    for (const formula of ["x+1", String.raw`\phantom{x}`]) {
-      const issues = await expectIssues(
-        `正文。\n\n\`\`\`math\n${formula}\n\`\`\``,
-        runDirectory,
-        ["invalid_math_fence"],
-      );
-      expect(issues[0]?.line).toBe(3);
-      expect(issues[0]?.message).toContain("$...$");
-      expect(issues[0]?.message).toContain("$$...$$");
+    for (const markdown of ["", " \n\t\r"])
+      await expect(
+        compileNoteMarkdown(markdown, { runDirectory }),
+      ).rejects.toMatchObject({
+        issues: [expect.objectContaining({ code: "empty_document" })],
+      });
+    await expect(
+      compileNoteMarkdown("x".repeat(maxMarkdownLength + 1), { runDirectory }),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ code: "markdown_too_large" })],
+    });
+    for (const markdown of [
+      "---\ntitle: Note\n---",
+      "---",
+      "<script>gone</script>",
+      "$\\phantom{x}$",
+      "[definition]: https://example.test",
+      "| |\n|-|\n| | Hidden |",
+      '```mermaid\nflowchart TD\n a[" "]\n style a fill:#ff000000,stroke:none\n```',
+    ]) {
+      const note = await compileNoteMarkdown(markdown, { runDirectory });
+      expect(note.markdown).toBe(markdown);
     }
   });
 
-  test("keeps single-dollar math and escaped currency distinct", async () => {
-    const runDirectory = await temporary();
-    const note = await parseNoteMarkdown("Price \\$5; formula $x+1$.", {
-      runDirectory,
-    });
-    expect(note.structure.equations).toBe(1);
-  });
-
-  test("reports invalid KaTeX as non-blocking equation_fallback warnings", async () => {
-    const runDirectory = await temporary();
-    const note = await parseNoteMarkdown(
-      "公式 $\\notACommand{x}$ 一段。\n\n$$\n\\notACommand{y}\n$$\n\n另一段 $\\frac{1}{2}$。",
-      { runDirectory },
+  test("leaves table projection and missing cells to standard GFM rendering", async () => {
+    const note = await compileNoteMarkdown(
+      "| A | B |\n| - | - |\n| One |\n| Two | Visible | Hidden |",
+      { runDirectory: await temporary() },
     );
-    expect(note.mathWarnings).toHaveLength(2);
-    expect(
-      note.mathWarnings.every(
-        (warning) => warning.code === "equation_fallback",
-      ),
-    ).toBe(true);
-    expect(note.mathWarnings.every((warning) => !warning.blocking)).toBe(true);
-    expect(note.mathWarnings[0]?.elementId).toBe("hn-0001");
-    expect(note.mathWarnings[1]?.elementId).toBe("hn-0002");
-  });
-});
-
-describe("noteMarkdownToHtml", () => {
-  test("renders anchors, KaTeX, GFM tables, and mermaid swap with anchor moved to pre", async () => {
-    const runDirectory = await temporary();
-    await figureFixture(runDirectory);
-    const note = await parseNoteMarkdown(
-      `# 标题
-
-正文 $x^2$ 一句。
-
-| 列一 | 列二 |
-| --- | --- |
-| 1 | 2 |
-
-\`\`\`mermaid
-flowchart TD
-  a --> b
-\`\`\`
-
-\`\`\`python
-print("hi")
-\`\`\`
-`,
-      { runDirectory },
-    );
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain('<h1 data-hn-id="hn-0001"');
-    expect(html).toContain('data-hn-id="hn-0002"');
-    expect(html).toContain("katex");
-    expect(html).toContain("<table");
-    expect(html).toContain("<th>列一</th>");
-    expect(html).toMatch(
-      /<pre class="mermaid" data-hn-id="hn-0004">[^<]*flowchart TD/,
-    );
-    expect(html).not.toContain("language-mermaid");
-    expect(html).toContain("<code");
-    expect(html).toContain('class="language-python"');
-  });
-
-  test("preserves the display-math anchor through KaTeX conversion", async () => {
-    const runDirectory = await temporary();
-    const note = await parseNoteMarkdown("$$\nx^2\n$$", { runDirectory });
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toMatch(
-      /^<div data-hn-id="hn-0001"><span class="katex-display">/,
-    );
-  });
-
-  test("inlines local figures as data URIs and wraps standalone images in figure", async () => {
-    const runDirectory = await temporary();
-    await figureFixture(runDirectory);
-    const note = await parseNoteMarkdown(
-      "前文。\n\n![裁片说明](assets/figures/figure-001.png)\n\n后文 ![行内](assets/figures/figure-001.png) 图片。",
-      { runDirectory },
-    );
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain("data:image/png;base64,");
-    expect(html).not.toContain("assets/figures/figure-001.png");
-    expect(html).toMatch(/<figure data-hn-id="hn-0002">/);
-    expect(html).toContain("<figcaption>裁片说明</figcaption>");
-    expect(html).not.toMatch(/<figcaption>[^<]*行内/);
-  });
-
-  test("leaves inline images un-wrapped and skips figure caption for empty alt", async () => {
-    const runDirectory = await temporary();
-    await figureFixture(runDirectory);
-    const note = await parseNoteMarkdown("![](assets/figures/figure-001.png)", {
-      runDirectory,
-    });
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain("<figure");
-    expect(html).not.toContain("<figcaption");
-  });
-
-  test("accepts GFM task lists", async () => {
-    const runDirectory = await temporary();
-    const markdown = "- [ ] 待办\n- [x] 完成\n";
-    const note = await parseNoteMarkdown(markdown, { runDirectory });
-    expect(note.structure.blocks).toBe(3);
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain("待办");
-  });
-
-  test("blockquote and nested list anchors are assigned per block", async () => {
-    const runDirectory = await temporary();
-    const note = await parseNoteMarkdown(
-      "> 引用内容\n\n- 项目一\n  - 子项目\n",
-      { runDirectory },
-    );
-    const html = await noteMarkdownToHtml(note, { runDirectory });
-    expect(html).toContain('data-hn-id="hn-0001"');
-    expect(html).toContain('data-hn-id="hn-0002"');
-    expect(html).toContain('data-hn-id="hn-0003"');
+    expect(note.html).toContain("<td>One</td><td></td>");
+    expect(note.html).toContain("<td>Two</td><td>Visible</td>");
+    expect(note.html).not.toContain("Hidden");
   });
 });

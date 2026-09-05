@@ -59,7 +59,9 @@ describe("configuration", () => {
     expect(prompt).toContain("only when that title is explicitly written");
     expect(prompt).toContain("Never use a callout to hold omitted");
     expect(prompt).toContain("Audit data is session-only");
-    expect(prompt).toContain("never copy TeX commands or delimiters");
+    expect(prompt).toContain("exact substring of the Markdown source");
+    expect(prompt).toContain("overlapping matches count");
+    expect(prompt).toContain("does not prove the content is visible");
     expect(prompt).toContain("confidence is at least 0.95");
     expect(prompt).toContain("Compare the render with the original source");
     expect(prompt).toContain("visible uncertainty/correction material");
