@@ -312,6 +312,12 @@ function validateIssues(tree: Root): MarkdownIssue[] {
       );
     if (node.type === "code") {
       const code = node as { lang?: string | null; value?: string };
+      if (code.lang === "math")
+        addUnique(
+          "invalid_math_fence",
+          "Math code fences are not allowed; use $...$ or $$...$$ instead",
+          node,
+        );
       if (code.lang?.toLowerCase() === "mermaid" && code.lang !== "mermaid")
         addUnique(
           "invalid_mermaid_fence",

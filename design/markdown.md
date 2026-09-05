@@ -16,6 +16,7 @@ GFM Markdown 是笔记的 canonical 持久化格式 (模型的心智模型与磁
 | `raw_html` | 任何 mdast `html` 节点 (含段内 inline HTML), 以及 mermaid code block 内的 HTML markup (含普通 / 闭合 / 自闭合 / 大小写 / 跨行属性标签, 注释, 声明, CDATA 与 processing instruction) |
 | `link_not_allowed` | 任何 `link` (含 GFM autolink literal, 裸 URL 即 link), 非图片 `definition`, footnote reference/definition; 含 mermaid code block 内行首或分号分隔的 click 指令 / markdown 链接 / 任意大小写的 `img` 节点属性 / URL scheme `https?://` (静态文本校验) |
 | `invalid_mermaid_fence` | Mermaid fence 的语言名不是精确小写 `mermaid` |
+| `invalid_math_fence` | 语言名为 `math` 的代码围栏；数学只允许 `$...$` / `$$...$$`，避免普通 code 绕过数学校验后被 KaTeX 转换 |
 | `invalid_image_syntax` | 引用式图片 (含未定义、折叠和快捷形式); 图片仅允许内联本地语法 |
 | `invalid_image_path` | `image.url` 不匹配 `^assets/figures/[A-Za-z0-9][A-Za-z0-9._-]*\.png$` |
 | `unknown_image` | 引用的 asset 文件在 run 目录下不存在 |

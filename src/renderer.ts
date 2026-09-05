@@ -255,7 +255,9 @@ async function screenshotTall(
     };
     const mathTextBlocks = Array.from(
       document.querySelectorAll<HTMLElement>(".katex, .katex-error"),
-      (element) => {
+    )
+      .filter((element) => !element.closest("pre.mermaid"))
+      .map((element) => {
         if (element.classList.contains("katex-error"))
           return element.textContent ?? "";
         const semantics = element.querySelector("math > semantics");
@@ -263,8 +265,7 @@ async function screenshotTall(
           (child) => child.tagName.toLowerCase() !== "annotation",
         );
         return presentation ? mathPresentationText(presentation) : "";
-      },
-    );
+      });
     const imageCaptionBlocks = Array.from(document.querySelectorAll("img"))
       .filter((element) => !element.closest("pre.mermaid"))
       .map((element) => {

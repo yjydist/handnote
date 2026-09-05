@@ -159,6 +159,56 @@ describe("note tool sequencing", () => {
     expect(state.revision).toBeUndefined();
   });
 
+  test("math fences cannot create or replace a committed revision", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    const write = tools.write_note.execute;
+    const revise = tools.revise_note.execute;
+    if (!write || !revise) throw new Error("missing tools");
+    state.beginModelStep();
+    for (const formula of ["x+1", String.raw`\phantom{x}`]) {
+      expect(
+        await write(
+          { markdown: `\`\`\`math\n${formula}\n\`\`\``, audit: {} },
+          {} as Parameters<typeof write>[1],
+        ),
+      ).toMatchObject({
+        ok: false,
+        error: {
+          code: "invalid_markdown",
+          repairable: true,
+          message: expect.stringContaining("invalid_math_fence (line 1)"),
+        },
+      });
+      expect(state.revision).toBeUndefined();
+      expect(
+        await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+      ).toBe(false);
+    }
+    expect(
+      await write(
+        { markdown: simpleMarkdown(), audit: {} },
+        {} as Parameters<typeof write>[1],
+      ),
+    ).toMatchObject({ ok: true, revision: 1 });
+    const committed = state.revision;
+    if (!committed) throw new Error("missing committed revision");
+    state.beginModelStep();
+    expect(
+      await revise(
+        { markdown: "```math\n\\phantom{x}\n```", audit: {} },
+        {} as Parameters<typeof revise>[1],
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_markdown" } });
+    expect(state.revision).toBe(committed);
+    expect(
+      await readFile(`${directory}/revisions/revision-001.md`, "utf8"),
+    ).toBe(simpleMarkdown());
+    expect(
+      await Bun.file(`${directory}/revisions/revision-002.md`).exists(),
+    ).toBe(false);
+  });
+
   test("write_note rejects audit quotes missing from the markdown as invalid_audit", async () => {
     const directory = await temporary();
     const { state, tools } = await setup(directory);
@@ -262,6 +312,49 @@ describe("note tool sequencing", () => {
     expect(state.revision?.render).not.toHaveProperty("semanticEvidence");
     const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
     expect(session).not.toContain("semanticEvidence");
+  });
+
+  test("Mermaid math does not shift subsequent body audit targets", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    state.beginModelStep();
+    const markdown =
+      '```mermaid\nflowchart TD\n a["$$x$$"] --> b[Done]\n```\n\nValue $y$.';
+    for (const quote of ["Value x.", "Value y."]) {
+      const result = await execute(
+        {
+          markdown,
+          audit: {
+            uncertainties: [
+              {
+                id: "u1",
+                target: { quote },
+                bestGuess: "y",
+                candidates: ["y", "z"],
+                basis: "ambiguous source",
+                region: fullRegion,
+                confidence: 0.5,
+              },
+            ],
+          },
+        },
+        {} as Parameters<typeof execute>[1],
+      );
+      if (quote === "Value x.") {
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: "invalid_audit" },
+        });
+        expect(state.revision).toBeUndefined();
+      } else {
+        expect(result).toMatchObject({ ok: true, revision: 1 });
+        expect(state.revision?.audit.uncertainties[0]?.target.quote).toBe(
+          quote,
+        );
+      }
+    }
   });
 
   test("write_note rejects a Mermaid declaration with no rendered content", async () => {

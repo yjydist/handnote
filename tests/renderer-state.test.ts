@@ -54,6 +54,23 @@ const fakeRender = (
 });
 
 describe("renderer", () => {
+  test("keeps Mermaid math separate from body math evidence", async () => {
+    const directory = await temporary();
+    const note = await parseNoteMarkdown(
+      '```mermaid\nflowchart TD\n a["$$x$$"] --> b[Done]\n```\n\nValue $y$.',
+      { runDirectory: directory },
+    );
+    const { render, semanticEvidence } = await renderDocument(
+      note,
+      directory,
+      1,
+      700,
+    );
+    expect(render.warnings).toEqual([]);
+    expect(semanticEvidence.mathTextBlocks).toEqual(["y"]);
+    expect(semanticEvidence.mermaidTextBlocks).toEqual([["x", "Done"]]);
+  });
+
   test("extracts math operands without phantom or transparent descendants", async () => {
     const directory = await temporary();
     const cases = [

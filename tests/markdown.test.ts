@@ -306,6 +306,20 @@ $$
       );
   });
 
+  test("rejects math code fences with a located repair instruction", async () => {
+    const runDirectory = await temporary();
+    for (const formula of ["x+1", String.raw`\phantom{x}`]) {
+      const issues = await expectIssues(
+        `正文。\n\n\`\`\`math\n${formula}\n\`\`\``,
+        runDirectory,
+        ["invalid_math_fence"],
+      );
+      expect(issues[0]?.line).toBe(3);
+      expect(issues[0]?.message).toContain("$...$");
+      expect(issues[0]?.message).toContain("$$...$$");
+    }
+  });
+
   test("keeps single-dollar math and escaped currency distinct", async () => {
     const runDirectory = await temporary();
     const note = await parseNoteMarkdown("Price \\$5; formula $x+1$.", {
