@@ -36,4 +36,6 @@ Classify the primary cause as one of:
 
 Check for a secondary failure only when it materially changed the terminal status. A `partial` result is expected when a valid revision exists but finalization did not succeed; `complete` requires a manifest-confirmed `note.finalized` event. For finalization failures, compare the revision's render step, later review step, finalization step, mutation history, blocking warnings, and the on-disk revision and asset hashes.
 
+After a complete manifest is committed, later model, logging, inspection cleanup or accounting failures do not downgrade the result. A session write failure may leave only a stderr diagnostic and an older accounting snapshot. Verify the committed artifacts and report any missing accounting evidence separately from the completed output.
+
 Report the observed status and primary cause, the evidence chain, and one minimal repair suggestion. Separate facts from inference. If evidence is insufficient, name the exact missing artifact or event instead of guessing.

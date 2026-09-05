@@ -124,68 +124,68 @@ export async function executeRun(
   const state = new RunState();
   let stopReason = "internal_error";
   let terminalError: HandnoteError | undefined;
-  recorder.record("run.started", {
-    runId: store.manifest.runId,
-    input: input.path,
-    config: { ...config, promptText: "[PROMPT_RECORDED_BY_HASH]" },
-  });
   try {
-    await store.copyInput(input.path);
-    const sourcePath = store.path(store.manifest.input.path);
-    const tools = createHandnoteTools({
-      store,
-      sourcePath,
-      runDirectory: store.directory,
-      width: config.width,
-      maxSteps: config.maxSteps,
-      maxInspectCalls: config.maxInspectCalls,
-      toolMedia: config.toolMedia,
-      state,
-      recorder,
+    recorder.record("run.started", {
+      runId: store.manifest.runId,
+      input: input.path,
+      config: { ...config, promptText: "[PROMPT_RECORDED_BY_HASH]" },
     });
-    const model = createModel({ config, recorder, state, stats, store });
-    const result = await runAgent({
-      config,
-      model,
-      tools,
-      sourcePath,
-      sourceMimeType: input.mimeType,
-      recorder,
-      state,
-      stats: agentStats,
-      store,
-    });
-    const hasRevision = Boolean(store.manifest.currentRevision);
-    stopReason =
-      result.steps >= config.maxSteps
-        ? hasRevision
-          ? "max_steps"
-          : "max_steps_no_revision"
-        : hasRevision
-          ? "model_stopped"
-          : "model_stopped_no_revision";
-  } catch (error) {
-    terminalError =
-      error instanceof HandnoteError
-        ? error
-        : new HandnoteError(asError(error).message, "internal", false, {
-            cause: error,
-          });
-    stopReason = terminalError.kind;
-    recorder.record("run.error", {
-      kind: terminalError.kind,
-      message: terminalError.message,
-      error: safeErrorMetadata(terminalError.cause ?? terminalError),
-    });
-  }
-  if (!config.saveIntermediateImages) {
     try {
-      await cleanupIntermediate(store.directory, recorder);
+      await store.copyInput(input.path);
+      const sourcePath = store.path(store.manifest.input.path);
+      const tools = createHandnoteTools({
+        store,
+        sourcePath,
+        runDirectory: store.directory,
+        width: config.width,
+        maxSteps: config.maxSteps,
+        maxInspectCalls: config.maxInspectCalls,
+        toolMedia: config.toolMedia,
+        state,
+        recorder,
+      });
+      const model = createModel({ config, recorder, state, stats, store });
+      const result = await runAgent({
+        config,
+        model,
+        tools,
+        sourcePath,
+        sourceMimeType: input.mimeType,
+        recorder,
+        state,
+        stats: agentStats,
+        store,
+      });
+      const hasRevision = Boolean(store.manifest.currentRevision);
+      stopReason =
+        result.steps >= config.maxSteps
+          ? hasRevision
+            ? "max_steps"
+            : "max_steps_no_revision"
+          : hasRevision
+            ? "model_stopped"
+            : "model_stopped_no_revision";
     } catch (error) {
-      recorder.record("cleanup.failed", { error: safeErrorMetadata(error) });
+      terminalError =
+        error instanceof HandnoteError
+          ? error
+          : new HandnoteError(asError(error).message, "internal", false, {
+              cause: error,
+            });
+      stopReason = terminalError.kind;
+      recorder.record("run.error", {
+        kind: terminalError.kind,
+        message: terminalError.message,
+        error: safeErrorMetadata(terminalError.cause ?? terminalError),
+      });
     }
-  }
-  try {
+    if (!config.saveIntermediateImages) {
+      try {
+        await cleanupIntermediate(store.directory, recorder);
+      } catch (error) {
+        recorder.record("cleanup.failed", { error: safeErrorMetadata(error) });
+      }
+    }
     await store.updateModel({
       steps: state.modelStep,
       retries: stats.retries,
@@ -213,7 +213,7 @@ export async function executeRun(
     const manifest = store.manifest;
     if (manifest.status === "complete") {
       console.error(
-        "Final output is complete; final accounting could not be persisted",
+        "Final output is complete; post-finalization work failed",
         safeErrorMetadata(error),
       );
       return {

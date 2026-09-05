@@ -388,6 +388,148 @@ describe("run controller", () => {
     }
   }, 30000);
 
+  test.each(["after-complete", "cleanup", "before-finalize"])(
+    "CLI preserves the committed outcome when session writes fail: %s",
+    async (failureMode) => {
+      const directory = await temporary();
+      const runs = `${directory}/runs`;
+      const script: Array<[string, unknown]> = [
+        ["write_note", simpleDraft()],
+        ["review_render", {}],
+        ["finalize_note", {}],
+      ];
+      let requests = 0;
+      const server = Bun.serve({
+        port: 0,
+        async fetch() {
+          const item = script[requests++];
+          if (failureMode === "cleanup" && requests === 1) {
+            const [runName] = await readdir(runs);
+            const inspections = `${runs}/${runName}/intermediate/inspections`;
+            await mkdir(inspections, { recursive: true });
+            await writeFile(`${inspections}/evidence.png`, "inspection bytes");
+          }
+          return item
+            ? completion(item[0], item[1], requests)
+            : textCompletion(requests);
+        },
+      });
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          "offline",
+        );
+        const config = `${directory}/config.yaml`;
+        await writeFile(
+          config,
+          `${await readFile(config, "utf8")}saveIntermediateImages: false\n`,
+        );
+        const faultPath = `${directory}/session-failure.ts`;
+        const snapshotPath = `${directory}/before-failure.json`;
+        await writeFile(
+          faultPath,
+          `
+          import { existsSync, readFileSync, writeFileSync } from "node:fs";
+          import { SessionRecorder } from ${JSON.stringify(`${import.meta.dir}/../src/session.ts`)};
+          const record = SessionRecorder.prototype.record;
+          const mode = ${JSON.stringify(failureMode)};
+          let failed = false;
+          SessionRecorder.prototype.record = function(type, data) {
+            const path = this.runDirectory + "/run.json";
+            const manifest = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+            const shouldFail = mode === "cleanup"
+              ? type === "media.removed" || type === "cleanup.failed"
+              : mode === "after-complete"
+                ? manifest?.status === "complete"
+                : Boolean(manifest?.currentRevision);
+            if (shouldFail) {
+              if (!failed) writeFileSync(${JSON.stringify(snapshotPath)}, JSON.stringify({
+                manifest: readFileSync(path, "utf8"),
+                session: readFileSync(this.path, "utf8"),
+              }));
+              failed = true;
+              throw Object.assign(new Error("injected session disk full"), { code: "ENOSPC" });
+            }
+            return record.call(this, type, data);
+          };
+        `,
+        );
+        const child = Bun.spawn(
+          [
+            "bun",
+            "--preload",
+            faultPath,
+            "src/cli.ts",
+            "run",
+            input,
+            "--config",
+            config,
+            "--output",
+            runs,
+            "--json",
+          ],
+          { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+        );
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        expect(stdout.trim().split("\n")).toHaveLength(1);
+        const result = JSON.parse(stdout);
+        const [runName] = await readdir(runs);
+        const store = await RunStore.open(`${runs}/${runName}`);
+        const before = JSON.parse(await readFile(snapshotPath, "utf8"));
+        expect(await readFile(store.path("run.json"), "utf8")).toBe(
+          before.manifest,
+        );
+        expect(await readFile(store.path("session/events.jsonl"), "utf8")).toBe(
+          before.session,
+        );
+        if (failureMode === "before-finalize") {
+          expect(code).toBe(1);
+          expect(result).toMatchObject({
+            status: "failed",
+            stopReason: "filesystem",
+          });
+          expect(store.manifest.status).toBe("running");
+          expect(store.manifest.currentRevision).toBe(1);
+          expect(await Bun.file(store.path("output/note.md")).exists()).toBe(
+            false,
+          );
+          expect(await Bun.file(store.path("output/note.png")).exists()).toBe(
+            false,
+          );
+        } else {
+          expect(code).toBe(0);
+          expect(result).toMatchObject({
+            status: "complete",
+            exitCode: 0,
+            runDirectory: store.directory,
+          });
+          expect(stderr).toContain("Final output is complete");
+          const final = store.manifest.final;
+          if (!final) throw new Error("Missing final output");
+          for (const artifact of [final.markdown, final.image])
+            expect(await sha256File(store.path(artifact.path))).toBe(
+              artifact.sha256,
+            );
+          if (failureMode === "cleanup")
+            expect(
+              await readFile(
+                store.path("intermediate/inspections/evidence.png"),
+                "utf8",
+              ),
+            ).toBe("inspection bytes");
+        }
+      } finally {
+        server.stop(true);
+      }
+    },
+    30000,
+  );
+
   test("recognizes PNG, JPEG, and WebP display input", async () => {
     const directory = await temporary();
     for (const [format, extension] of [
