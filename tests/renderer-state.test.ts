@@ -118,6 +118,7 @@ ${figureMarkdown}
       mermaidTextBlocks: [["开始", "标签", "结束"]],
       mermaidVisibleBlocks: [true],
       mathTextBlocks: ["x2y", "\\notACommand{"],
+      imageCaptionBlocks: ["原图"],
     });
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),
@@ -308,6 +309,7 @@ ${figureMarkdown}
       mermaidTextBlocks: [[]],
       mermaidVisibleBlocks: [true],
       mathTextBlocks: [],
+      imageCaptionBlocks: [],
     });
   }, 30_000);
 
@@ -405,6 +407,7 @@ ${figureMarkdown}
 
     const { semanticEvidence } = await renderDocument(note, directory, 1, 700);
     expect(semanticEvidence.forbiddenMermaidContent).toBe(true);
+    expect(semanticEvidence.imageCaptionBlocks).toEqual([]);
   }, 30_000);
 
   test("allows only the exact render document file URL and data URLs", () => {

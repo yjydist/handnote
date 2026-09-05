@@ -100,11 +100,14 @@ function auditTargetValidation(
   tree: Root,
   audit: RevisionAudit,
   evidence?: AuditTextEvidence,
-): { messages: string[]; mermaidCount: number; mathCount: number } {
-  const { blocks, mermaidCount, mathCount } = analyzeMarkdownSemantics(
-    tree,
-    evidence,
-  );
+): {
+  messages: string[];
+  mermaidCount: number;
+  mathCount: number;
+  imageCount: number;
+} {
+  const { blocks, mermaidCount, mathCount, imageCount } =
+    analyzeMarkdownSemantics(tree, evidence);
   const folded = blocks.join("\0");
   const occurrenceCounts = new Map<string, number>();
   const messages: string[] = [];
@@ -121,7 +124,7 @@ function auditTargetValidation(
         `Audit ${item.id} quote not found (occurrence ${required})`,
       );
   }
-  return { messages, mermaidCount, mathCount };
+  return { messages, mermaidCount, mathCount, imageCount };
 }
 
 export function validateAuditTargets(
@@ -146,7 +149,12 @@ export const revisionDraftSchema = z
       parseMarkdownTree(draft.markdown),
       draft.audit,
     );
-    if (validation.mermaidCount > 0 || validation.mathCount > 0) return;
+    if (
+      validation.mermaidCount > 0 ||
+      validation.mathCount > 0 ||
+      validation.imageCount > 0
+    )
+      return;
     for (const message of validation.messages)
       ctx.addIssue({ code: "custom", message, path: ["audit"] });
   });

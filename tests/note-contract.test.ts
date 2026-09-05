@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { revisionDraftSchema } from "../src/document.ts";
@@ -367,6 +367,120 @@ describe("note tool sequencing", () => {
     expect(session).not.toContain("semanticEvidence");
   });
 
+  test("write_note matches only rendered image captions across Markdown contexts", async () => {
+    const directory = await temporary();
+    const { state, tools } = await setup(directory);
+    await mkdir(`${directory}/assets/figures`, { recursive: true });
+    await sharp({
+      create: { width: 20, height: 20, channels: 3, background: "white" },
+    })
+      .png()
+      .toFile(`${directory}/assets/figures/figure-001.png`);
+    const img = (alt: string) => `![${alt}](assets/figures/figure-001.png)`;
+    const markdown = [
+      `Before ${img("inline secret")} after.`,
+      `# ${img("heading secret")}`,
+      `| image |\n| --- |\n| ${img("table secret")} |`,
+      `**${img("emphasis secret")}**`,
+      `- ${img("tight secret")}\n- second item`,
+      "Separate lists.",
+      `- ${img("loose caption")}\n\n- second item`,
+      "Separate tasks.",
+      `- [ ] ${img("task secret")}\n\n- [x] complete`,
+      img("standalone &amp; caption"),
+      `> ${img("quoted caption")}`,
+      img(""),
+      "Shared words",
+      img("Shared   words"),
+      `Inline ${img("Shared words")} tail`,
+      "$\\text{Shared words}$",
+      '```mermaid\nflowchart TD\n a["Shared words"]\n```',
+    ].join("\n\n");
+    const audit = (targets: { quote: string; occurrence?: number }[]) => ({
+      uncertainties: targets.map((target, index) => ({
+        id: `u${index}`,
+        target,
+        bestGuess: target.quote,
+        candidates: [target.quote, "alternative"],
+        basis: "b",
+        region: fullRegion,
+        confidence: 0.5,
+      })),
+    });
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    state.beginModelStep();
+    const rejectedTargets: { quote: string; occurrence?: number }[] = [
+      ...[
+        "inline secret",
+        "heading secret",
+        "table secret",
+        "emphasis secret",
+        "tight secret",
+        "task secret",
+        "caption quoted",
+      ].map((quote) => ({ quote })),
+      { quote: "Shared words", occurrence: 5 },
+    ];
+    const rejected = await execute(
+      { markdown, audit: audit(rejectedTargets) },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: "invalid_audit" },
+    });
+    for (const [index, target] of rejectedTargets.entries()) {
+      expect(
+        (rejected as { error: { message: string } }).error.message,
+      ).toContain(
+        `Audit u${index} quote not found (occurrence ${target.occurrence ?? 1})`,
+      );
+    }
+    expect(state.revision).toBeUndefined();
+    expect(
+      await Bun.file(`${directory}/revisions/revision-001.md`).exists(),
+    ).toBe(false);
+    const accepted = await execute(
+      {
+        markdown,
+        audit: audit([
+          { quote: "Before after." },
+          { quote: "loose caption" },
+          { quote: "standalone & caption" },
+          { quote: "quoted caption" },
+          { quote: "Shared words", occurrence: 4 },
+        ]),
+      },
+      {} as Parameters<typeof execute>[1],
+    );
+    expect(accepted).toMatchObject({ ok: true, revision: 1 });
+    expect(JSON.stringify(accepted)).not.toContain("imageCaptionBlocks");
+    expect(JSON.stringify(state.revision)).not.toContain("imageCaptionBlocks");
+    expect(
+      await readFile(`${directory}/session/events.jsonl`, "utf8"),
+    ).not.toContain("imageCaptionBlocks");
+  }, 30_000);
+
+  test("write_note accepts an image without alt as content", async () => {
+    const directory = await temporary();
+    const { tools } = await setup(directory);
+    await mkdir(`${directory}/assets/figures`, { recursive: true });
+    await sharp({
+      create: { width: 20, height: 20, channels: 3, background: "white" },
+    })
+      .png()
+      .toFile(`${directory}/assets/figures/figure-001.png`);
+    const execute = tools.write_note.execute;
+    if (!execute) throw new Error("missing write_note");
+    expect(
+      await execute(
+        { markdown: "![](assets/figures/figure-001.png)", audit: {} },
+        {} as Parameters<typeof execute>[1],
+      ),
+    ).toMatchObject({ ok: true, revision: 1 });
+  });
+
   test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
     const directory = await temporary();
     const { tools } = await setup(directory);
@@ -469,6 +583,22 @@ describe("quote locator validation", () => {
     ).toBe(true);
   });
 
+  test("defers image locators to rendering while preserving audit structure checks", () => {
+    const input = {
+      ...draft("caption"),
+      markdown: "![caption](assets/figures/figure-001.png)",
+    };
+    expect(revisionDraftSchema.safeParse(input).success).toBe(true);
+    expect(
+      revisionDraftSchema.safeParse({
+        ...input,
+        audit: {
+          uncertainties: [{ ...input.audit.uncertainties[0], confidence: 2 }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   test("matches visible Markdown text without markup or cross-block phantoms", () => {
     const markdown = [
       "# **Visible** heading",
@@ -480,20 +610,12 @@ describe("quote locator validation", () => {
       "| cell | `code` |",
       "| --- | --- |",
       "| value | plain |",
-      "",
-      "![figure alt](assets/figures/figure-001.png)",
     ].join("\n");
     const withMarkdown = (quote: string) => ({
       ...draft(quote),
       markdown,
     });
-    for (const quote of [
-      "Visible heading",
-      "cell",
-      "code",
-      "plain",
-      "figure alt",
-    ])
+    for (const quote of ["Visible heading", "cell", "code", "plain"])
       expect(revisionDraftSchema.safeParse(withMarkdown(quote)).success).toBe(
         true,
       );

@@ -3,6 +3,7 @@ import type { PhrasingContent, Root, RootContent } from "mdast";
 export interface AuditTextEvidence {
   mermaidTextBlocks: readonly (readonly string[])[];
   mathTextBlocks: readonly string[];
+  imageCaptionBlocks: readonly string[];
 }
 
 export interface RenderedSemanticEvidence extends AuditTextEvidence {
@@ -15,6 +16,7 @@ export interface MarkdownSemantics {
   hasStaticContent: boolean;
   mermaidCount: number;
   mathCount: number;
+  imageCount: number;
 }
 
 interface SemanticState {
@@ -23,6 +25,7 @@ interface SemanticState {
   hasStaticContent: boolean;
   mermaidCount: number;
   mathCount: number;
+  imageCount: number;
 }
 
 export const foldWhitespace = (value: string): string =>
@@ -42,7 +45,10 @@ function phrasingText(nodes: PhrasingContent[], state: SemanticState): string {
       }
       if (node.type === "image" || node.type === "imageReference") {
         state.hasStaticContent = true;
-        return node.alt ?? "";
+        const caption =
+          state.evidence?.imageCaptionBlocks[state.imageCount] ?? "";
+        state.imageCount++;
+        return caption;
       }
       if (node.type === "break") return " ";
       if ("children" in node) return phrasingText(node.children, state);
@@ -61,6 +67,7 @@ export function analyzeMarkdownSemantics(
     hasStaticContent: false,
     mermaidCount: 0,
     mathCount: 0,
+    imageCount: 0,
   };
   const collect = (node: Root | RootContent): void => {
     if (
@@ -99,6 +106,7 @@ export function analyzeMarkdownSemantics(
     hasStaticContent: state.hasStaticContent,
     mermaidCount: state.mermaidCount,
     mathCount: state.mathCount,
+    imageCount: state.imageCount,
   };
 }
 

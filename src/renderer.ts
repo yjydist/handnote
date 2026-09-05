@@ -245,6 +245,16 @@ async function screenshotTall(
         return presentation?.textContent ?? "";
       },
     );
+    const imageCaptionBlocks = Array.from(document.querySelectorAll("img"))
+      .filter((element) => !element.closest("pre.mermaid"))
+      .map((element) => {
+        const figure = element.parentElement;
+        if (figure?.tagName !== "FIGURE") return "";
+        const caption = figure.querySelector(":scope > figcaption");
+        return caption && effectivelyVisible(caption, true)
+          ? (caption.textContent ?? "")
+          : "";
+      });
     const runtime = globalThis as typeof globalThis & {
       __handnoteMermaidError?: string;
     };
@@ -322,6 +332,7 @@ async function screenshotTall(
         mermaidTextBlocks,
         mermaidVisibleBlocks,
         mathTextBlocks,
+        imageCaptionBlocks,
       },
     };
   });
