@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as fsSync from "node:fs";
 import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,6 +28,38 @@ async function reviewed() {
 }
 const diskFull = () =>
   Object.assign(new Error("injected disk full"), { code: "ENOSPC" });
+
+function failSessionAppendOnce(
+  path: string,
+  eventType: string,
+  stage: "before" | "partial" | "flushed",
+) {
+  const append = fsSync.appendFileSync;
+  const error = Object.assign(new Error(`injected ${stage} append failure`), {
+    code: stage === "flushed" ? "EIO" : "ENOSPC",
+  });
+  let injected = false;
+  const failure = spyOn(fsSync, "appendFileSync").mockImplementation(
+    (file, data, options) => {
+      if (
+        injected ||
+        String(file) !== path ||
+        !String(data).includes(`"type":"${eventType}"`)
+      )
+        return append(file, data, options);
+      injected = true;
+      if (stage === "partial")
+        append(
+          file,
+          String(data).slice(0, Math.floor(String(data).length / 2)),
+          options,
+        );
+      if (stage === "flushed") append(file, data, options);
+      throw error;
+    },
+  );
+  return { failure, error };
+}
 afterEach(async () => {
   mock.restore();
   await Promise.all(
@@ -465,6 +498,162 @@ describe("artifact transaction failures", () => {
 });
 
 describe("session and recovery", () => {
+  test.each(["before", "partial", "flushed"] as const)(
+    "stops a recorder after an append failure until it is reopened: %s",
+    async (stage) => {
+      const store = await setup();
+      const recorder = store.recorder;
+      const fault = failSessionAppendOnce(recorder.path, "test.failure", stage);
+      let firstError: unknown;
+      try {
+        recorder.record("test.failure", { message: "diagnostic" });
+      } catch (error) {
+        firstError = error;
+      }
+      fault.failure.mockRestore();
+      const before = await fs.readFile(recorder.path);
+      expect(() => recorder.record("test.after_failure")).toThrow();
+      expect(() =>
+        recorder.recordRevision({
+          type: "render.reviewed",
+          revision: 1,
+          step: 2,
+          markdownSha256: "a".repeat(64),
+          imageSha256: "b".repeat(64),
+        }),
+      ).toThrow();
+      expect(await fs.readFile(recorder.path)).toEqual(before);
+      expect(firstError).toMatchObject({
+        kind: "filesystem",
+        cause: fault.error,
+      });
+      const session = readSession(recorder.path);
+      const reopened = SessionRecorder.open(store.directory);
+      expect(reopened.record("test.after_reopen").seq).toBe(
+        session.events.length + (session.trailingBytes ? 2 : 1),
+      );
+      const after = readSession(recorder.path);
+      expect(after.trailingBytes).toBe(0);
+      expect(after.events.map((event) => event.seq)).toEqual(
+        after.events.map((_, index) => index + 1),
+      );
+    },
+  );
+
+  test.each(["revision", "review", "finalize"] as const)(
+    "preserves the confirmed revision when its %s event fails after append",
+    async (operation) => {
+      const store = await reviewed();
+      const before = await fs.readFile(store.path("run.json"));
+      if (operation === "revision") {
+        const previous = store.manifest.revisions[0];
+        if (!previous) throw new Error("Missing revision");
+        spyOn(renderer, "renderDocument").mockImplementation(
+          async (note, directory, width) => {
+            const htmlPath = `${directory}/note.html`;
+            const imagePath = `${directory}/note.png`;
+            await fs.copyFile(store.path(previous.html.path), htmlPath);
+            await fs.copyFile(store.path(previous.image.path), imagePath);
+            return {
+              htmlPath,
+              imagePath,
+              width,
+              height: previous.height,
+              warnings: note.warnings,
+              structure: note.structure,
+            };
+          },
+        );
+      }
+      const eventType =
+        operation === "revision"
+          ? "document.revision.committed"
+          : operation === "review"
+            ? "render.reviewed"
+            : "note.finalized";
+      const fault = failSessionAppendOnce(
+        store.recorder.path,
+        eventType,
+        "flushed",
+      );
+      await expect(
+        operation === "revision"
+          ? store.commit(
+              { ...simpleDraft(), markdown: "# 未提交的修订\n\n这是正文。" },
+              { kind: "revise", step: 3, width: 700 },
+            )
+          : operation === "review"
+            ? store.review(3, async () => {})
+            : store.finalize(3),
+      ).rejects.toMatchObject({ kind: "filesystem", cause: fault.error });
+      fault.failure.mockRestore();
+      expect(await fs.readFile(store.path("run.json"))).toEqual(before);
+      expect(await fs.readdir(store.path("intermediate/revisions"))).toEqual([
+        "0001",
+      ]);
+      expect(existsSync(store.path("output"))).toBe(false);
+      expect(existsSync(store.path("output.tmp"))).toBe(false);
+      expect((await RunStore.open(store.directory)).manifest).toEqual(
+        JSON.parse(before.toString()),
+      );
+      const recovered = await RunStore.open(store.directory, {
+        mode: "recover",
+      });
+      expect(recovered.manifest.status).toBe("partial");
+      expect(recovered.manifest.final).toBeUndefined();
+      expect(recovered.manifest.reviewedRevision).toEqual(
+        JSON.parse(before.toString()).reviewedRevision,
+      );
+      expect((await recovered.readRevision())?.text).toBe(
+        simpleDraft().markdown,
+      );
+      await recovered.finalize(4);
+      expect((await RunStore.open(store.directory)).manifest.status).toBe(
+        "complete",
+      );
+    },
+    15000,
+  );
+
+  test.each(["before", "partial", "flushed"] as const)(
+    "can reopen after writing a tail recovery event fails: %s",
+    async (stage) => {
+      const store = await setup();
+      await fs.appendFile(store.recorder.path, '{"seq":');
+      const before = await fs.readFile(store.path("run.json"));
+      const orphan = store.path("intermediate/revisions/.0001.tmp/note.md");
+      await fs.mkdir(store.path("intermediate/revisions/.0001.tmp"), {
+        recursive: true,
+      });
+      await fs.writeFile(orphan, "uncommitted");
+      const fault = failSessionAppendOnce(
+        store.recorder.path,
+        "session.tail.recovered",
+        stage,
+      );
+      await expect(
+        RunStore.open(store.directory, { mode: "recover" }),
+      ).rejects.toMatchObject({ kind: "filesystem", cause: fault.error });
+      fault.failure.mockRestore();
+      expect(await fs.readFile(store.path("run.json"))).toEqual(before);
+      expect(await fs.readFile(orphan, "utf8")).toBe("uncommitted");
+      await RunStore.open(store.directory);
+      const recovered = await RunStore.open(store.directory, {
+        mode: "recover",
+      });
+      expect(recovered.manifest).toMatchObject({
+        status: "failed",
+        stopReason: "interrupted",
+      });
+      expect(existsSync(orphan)).toBe(false);
+      const session = readSession(store.recorder.path);
+      expect(session.trailingBytes).toBe(0);
+      expect(session.events.map((event) => event.seq)).toEqual(
+        session.events.map((_, index) => index + 1),
+      );
+    },
+  );
+
   test("recovers an empty interrupted run and discards only uncommitted artifacts", async () => {
     const store = await setup();
     await fs.mkdir(store.path("intermediate/revisions/.0001.tmp"), {

@@ -79,6 +79,7 @@ export class SessionRecorder {
   readonly path: string;
   readonly runDirectory: string;
   #seq = 0;
+  #appendFailure?: HandnoteError;
   readonly #redactionContext: RedactionContext;
 
   private constructor(runDirectory: string, options: RedactionOptions) {
@@ -135,20 +136,30 @@ export class SessionRecorder {
   }
 
   private append(type: string, data: unknown): SessionEvent {
+    if (this.#appendFailure) throw this.#appendFailure;
     const event = {
       seq: this.#seq + 1,
       time: isoWithOffset(),
       type,
       data,
     };
-    const path = checkedRunPath(this.runDirectory, "session/events.jsonl", {
-      kind: "file",
-      allowMissing: false,
-    });
-    appendFileSync(path, `${JSON.stringify(event)}\n`, {
-      encoding: "utf8",
-      flush: true,
-    });
+    const line = `${JSON.stringify(event)}\n`;
+    try {
+      const path = checkedRunPath(this.runDirectory, "session/events.jsonl", {
+        kind: "file",
+        allowMissing: false,
+      });
+      appendFileSync(path, line, { encoding: "utf8", flush: true });
+    } catch (error) {
+      // An unsuccessful append may still have written part or all of the line.
+      this.#appendFailure = new HandnoteError(
+        "Session log append failed; reopen the run before writing again",
+        "filesystem",
+        false,
+        { cause: error },
+      );
+      throw this.#appendFailure;
+    }
     this.#seq = event.seq;
     return event;
   }

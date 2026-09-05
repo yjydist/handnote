@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as fsSync from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -527,6 +528,109 @@ describe("run controller", () => {
             ).toBe("inspection bytes");
         }
       } finally {
+        server.stop(true);
+      }
+    },
+    30000,
+  );
+
+  test.each(["partial", "flushed"] as const)(
+    "keeps complete output after an actual session append failure: %s",
+    async (stage) => {
+      const directory = await temporary();
+      const script: Array<[string, unknown]> = [
+        ["write_note", simpleDraft()],
+        ["review_render", {}],
+        ["finalize_note", {}],
+      ];
+      let requests = 0;
+      const server = Bun.serve({
+        port: 0,
+        fetch() {
+          const item = script[requests++];
+          return item
+            ? completion(item[0], item[1], requests)
+            : textCompletion(requests);
+        },
+      });
+      const append = fsSync.appendFileSync;
+      let snapshot:
+        | {
+            manifest: Buffer<ArrayBuffer>;
+            session: Buffer<ArrayBuffer>;
+          }
+        | undefined;
+      const failure = spyOn(fsSync, "appendFileSync").mockImplementation(
+        (path, data, options) => {
+          const manifestPath = String(path).replace(
+            /\/session\/events\.jsonl$/,
+            "/run.json",
+          );
+          if (
+            !snapshot &&
+            fsSync.existsSync(manifestPath) &&
+            JSON.parse(fsSync.readFileSync(manifestPath, "utf8")).status ===
+              "complete"
+          ) {
+            append(
+              path,
+              stage === "partial"
+                ? String(data).slice(0, Math.floor(String(data).length / 2))
+                : data,
+              options,
+            );
+            snapshot = {
+              manifest: fsSync.readFileSync(manifestPath),
+              session: fsSync.readFileSync(path),
+            };
+            throw Object.assign(
+              new Error("injected append failure after completion"),
+              { code: "EIO" },
+            );
+          }
+          return append(path, data, options);
+        },
+      );
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          "offline",
+        );
+        const result = await executeRun(
+          input,
+          `${directory}/config.yaml`,
+          `${directory}/runs`,
+        );
+        failure.mockRestore();
+        if (!snapshot) throw new Error("Append failure was not injected");
+        expect(result.exitCode).toBe(0);
+        expect(result.manifest.status).toBe("complete");
+        const committedFinal = result.manifest.final;
+        if (!committedFinal) throw new Error("Missing committed final output");
+        const store = await RunStore.open(result.runDirectory);
+        expect(await readFile(store.path("run.json"))).toEqual(
+          snapshot.manifest,
+        );
+        expect(await readFile(store.path("session/events.jsonl"))).toEqual(
+          snapshot.session,
+        );
+        expect(
+          readSession(store.path("session/events.jsonl")).trailingBytes > 0,
+        ).toBe(stage === "partial");
+        const recovered = await RunStore.open(store.directory, {
+          mode: "recover",
+        });
+        expect(recovered.manifest.status).toBe("complete");
+        expect(recovered.manifest.final).toEqual(committedFinal);
+        const final = recovered.manifest.final;
+        if (!final) throw new Error("Missing final output");
+        for (const artifact of [final.markdown, final.image])
+          expect(await sha256File(store.path(artifact.path))).toBe(
+            artifact.sha256,
+          );
+      } finally {
+        failure.mockRestore();
         server.stop(true);
       }
     },

@@ -111,6 +111,8 @@ Read `run.json` first, then correlate `model.step.completed`, `model.attempt.*`,
 
 Session writes are synchronous and flushed. `SessionRecorder.create` exclusively creates a new log; `SessionRecorder.open` requires an existing log and continues its sequence. An existing run must have a nonempty log beginning with its `run.created` event. A missing or empty log is a filesystem error and never resets recorded usage. Recovery truncates only an incomplete last line after valid events and records that repair; invalid complete lines or duplicate sequences are errors. Ordinary session records and audit text recursively redact credential-like fields, Authorization values, URL credentials, and Base64 data. Manifest free text is also redacted, while its controlled paths, timestamps, states and hashes remain exact. The revision, review and finalize events referenced by the manifest preserve their integrity fields, including when an API key is a short placeholder. Media appears as `{path,mimeType,sha256,retained}` references.
 
+An append or flush failure disables that recorder: subsequent event writes report the original filesystem failure without touching the log. The failed operation leaves any partial or complete event in place, since a write error does not prove that no bytes were appended. Open the run in recovery mode to validate the log and obtain a new recorder; complete events determine the next sequence, and an incomplete tail follows the repair rule above. Even a complete revision or finalize event confirms no artifact without its manifest reference.
+
 ## Development
 
 ```sh
