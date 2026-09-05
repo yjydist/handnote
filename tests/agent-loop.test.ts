@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
-import {
-  accumulateAgentUsage,
-  createAgentRunStats,
-  runAgent,
-} from "../src/agent.ts";
+import { runAgent } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
 import type { createModel } from "../src/provider/index.ts";
 import { RunState } from "../src/state.ts";
@@ -28,35 +24,6 @@ const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 5, text: 5, reasoning: 0 },
 };
-
-test("accumulates completed-step usage including reasoning", () => {
-  const stats = createAgentRunStats();
-  accumulateAgentUsage(stats, {
-    inputTokens: 10,
-    outputTokens: 7,
-    totalTokens: 17,
-    cachedInputTokens: 6,
-    reasoningTokens: 5,
-  });
-  accumulateAgentUsage(stats, {
-    inputTokens: 20,
-    outputTokens: 4,
-    totalTokens: 24,
-    cachedInputTokens: 12,
-    reasoningTokens: 1,
-  });
-  expect(stats).toEqual({
-    completedSteps: 2,
-    usage: {
-      inputTokens: 30,
-      outputTokens: 11,
-      totalTokens: 41,
-      cachedInputTokens: 18,
-      reasoningTokens: 6,
-      textOutputTokens: 5,
-    },
-  });
-});
 
 test("runs an offline Mastra media tool loop and stops immediately after valid finalize", async () => {
   const directory = await mkdtemp(`${tmpdir()}/handnote-agent-`);
@@ -138,9 +105,16 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     sourceMimeType: "image/png",
     recorder,
     state,
-    stats: createAgentRunStats(),
   });
   expect(result.steps).toBe(3);
+  expect(result.usage).toEqual({
+    inputTokens: 30,
+    outputTokens: 15,
+    totalTokens: 45,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    textOutputTokens: 15,
+  });
   expect(call).toBe(3);
   expect(state.finalized).toBe(true);
   expect(model.doGenerateCalls[2]?.prompt).toEqual(

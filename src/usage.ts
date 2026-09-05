@@ -7,7 +7,7 @@ export interface TokenUsage {
   textOutputTokens?: number | undefined;
 }
 
-type StepUsage = Partial<
+export type StepUsage = Partial<
   Record<Exclude<keyof TokenUsage, "textOutputTokens">, unknown>
 >;
 

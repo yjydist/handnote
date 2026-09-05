@@ -8,38 +8,13 @@ import type { SessionRecorder } from "./session.ts";
 import type { RunState } from "./state.ts";
 import type { RunStore } from "./store.ts";
 import type { createHandnoteTools } from "./tools/index.ts";
-import { accumulateStepUsage, type TokenUsage } from "./usage.ts";
+import type { TokenUsage } from "./usage.ts";
 
 export interface AgentRunResult {
   finishReason: string;
   steps: number;
-  usage: AgentUsage;
+  usage: TokenUsage;
   text: string;
-}
-
-export type AgentUsage = TokenUsage;
-
-export interface AgentRunStats {
-  completedSteps: number;
-  usage: AgentUsage;
-}
-
-export function createAgentRunStats(): AgentRunStats {
-  return { completedSteps: 0, usage: {} };
-}
-
-export function accumulateAgentUsage(
-  stats: AgentRunStats,
-  usage: {
-    inputTokens?: number | undefined;
-    outputTokens?: number | undefined;
-    totalTokens?: number | undefined;
-    cachedInputTokens?: number | undefined;
-    reasoningTokens?: number | undefined;
-  },
-): void {
-  stats.completedSteps++;
-  stats.usage = accumulateStepUsage(stats.usage, usage);
 }
 
 export async function runAgent(options: {
@@ -51,7 +26,6 @@ export async function runAgent(options: {
   sourceMimeType: string;
   recorder: SessionRecorder;
   state: RunState;
-  stats: AgentRunStats;
 }): Promise<AgentRunResult> {
   const agent = new Agent({
     id: "handnote-agent",
@@ -90,7 +64,7 @@ export async function runAgent(options: {
           options.state.finalized || Boolean(options.state.fatalError),
         modelSettings: { maxRetries: 0 },
         onStepFinish: async (step) => {
-          accumulateAgentUsage(options.stats, step.usage);
+          options.state.completeModelStep(step.usage);
           options.recorder.record("model.step.completed", {
             step: options.state.modelStep,
             text: step.text,
@@ -99,10 +73,7 @@ export async function runAgent(options: {
             usage: step.usage,
             finishReason: step.finishReason,
           });
-          await options.store?.updateModel({
-            steps: options.state.modelStep,
-            usage: options.stats.usage,
-          });
+          await options.store?.updateModel(options.state.modelAccounting);
         },
         onError: ({ error }) => {
           const classified = classifyProviderError(error);
@@ -117,7 +88,7 @@ export async function runAgent(options: {
     const output = {
       finishReason: String(result.finishReason),
       steps: result.steps.length,
-      usage: options.stats.usage,
+      usage: options.state.modelAccounting.usage,
       text: result.text,
     };
     if (options.state.fatalError) throw options.state.fatalError;

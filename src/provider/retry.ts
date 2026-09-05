@@ -5,7 +5,7 @@ import type { RunState } from "../state.ts";
 import type { RunStore } from "../store.ts";
 import { classifyProviderError } from "./classify.ts";
 import { isRetryableStatus, record, retryAfter } from "./primitives.ts";
-import type { ProviderStats, RetryConfig } from "./types.ts";
+import type { RetryConfig } from "./types.ts";
 
 export function requestFingerprint(body: BodyInit | null | undefined):
   | {
@@ -41,7 +41,6 @@ export function createRetryingFetch(
   config: RetryConfig,
   recorder: SessionRecorder,
   state: RunState,
-  stats: ProviderStats,
   underlyingFetch: typeof fetch = fetch,
   repairResponse: (
     response: Response,
@@ -58,19 +57,14 @@ export function createRetryingFetch(
     const request = requestFingerprint(init?.body);
     let lastError: unknown;
     for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
-      stats.attempts++;
-      if (attempt > 0) stats.retries++;
+      state.beginModelAttempt({ step, attempt: attempt + 1 });
       const started = performance.now();
       recorder.record("model.attempt.started", {
         step,
         attempt: attempt + 1,
         ...(request ? { request } : {}),
       });
-      await store?.updateModel({
-        steps: step,
-        retries: stats.retries,
-        attempts: stats.attempts,
-      });
+      await store?.updateModel(state.modelAccounting);
       const timeout = AbortSignal.timeout(config.timeoutMs);
       const signal = init?.signal
         ? AbortSignal.any([init.signal, timeout])

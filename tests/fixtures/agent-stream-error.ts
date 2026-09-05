@@ -1,6 +1,6 @@
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
-import { createAgentRunStats, runAgent } from "../../src/agent.ts";
+import { runAgent } from "../../src/agent.ts";
 import type { HandnoteConfig } from "../../src/config.ts";
 import { HandnoteError } from "../../src/errors.ts";
 import type { createModel } from "../../src/provider/index.ts";
@@ -68,7 +68,6 @@ try {
     sourceMimeType: "image/png",
     recorder,
     state,
-    stats: createAgentRunStats(),
   });
   throw new Error("Expected model failure");
 } catch (error) {

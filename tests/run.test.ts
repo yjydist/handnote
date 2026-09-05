@@ -1162,14 +1162,30 @@ describe("run controller", () => {
 
   test("retains a valid revision as partial after a later authentication failure", async () => {
     const directory = await temporary();
+    const runs = `${directory}/runs`;
+    const checkpoints: unknown[] = [];
     let requests = 0;
     const server = Bun.serve({
       port: 0,
-      fetch: () => {
+      fetch: async () => {
+        const [runName] = await readdir(runs);
+        const runDirectory = `${runs}/${runName}`;
+        checkpoints.push({
+          model: JSON.parse(await readFile(`${runDirectory}/run.json`, "utf8"))
+            .model,
+          event: readSession(`${runDirectory}/session/events.jsonl`).events.at(
+            -1,
+          ),
+        });
         requests++;
         if (requests === 1)
           return completion("write_note", simpleDraft(), requests);
-        if (requests === 2) return completion("review_render", {}, requests);
+        if (requests === 2)
+          return new Response("", {
+            status: 429,
+            headers: { "retry-after": "0" },
+          });
+        if (requests === 3) return completion("review_render", {}, 2);
         return Response.json(
           { error: { message: "invalid API key", type: "authentication" } },
           { status: 401 },
@@ -1182,24 +1198,77 @@ describe("run controller", () => {
         `${server.url}v1`,
         "offline",
       );
-      const result = await executeRun(
-        input,
-        `${directory}/config.yaml`,
-        `${directory}/runs`,
+      const configPath = `${directory}/config.yaml`;
+      await writeFile(
+        configPath,
+        (await readFile(configPath, "utf8")).replace(
+          "maxRetries: 0",
+          "maxRetries: 1",
+        ),
       );
+      const result = await executeRun(input, configPath, runs);
       expect(result.manifest.status).toBe("partial");
       expect(result.exitCode).toBe(2);
       expect(result.manifest.stopReason).toBe("authentication");
       expect(result.manifest.error?.kind).toBe("authentication");
       expect(result.manifest.currentRevision).toBe(1);
       expect(result.manifest.final).toBeUndefined();
-      expect(result.manifest.model.usage).toMatchObject({
+      const firstStepUsage = {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 10,
+        cacheHitRate: 0,
+      };
+      const usage = {
         inputTokens: 20,
         outputTokens: 10,
         totalTokens: 30,
         cachedInputTokens: 8,
         uncachedInputTokens: 12,
+        cacheHitRate: 0.4,
+      };
+      expect(result.manifest.model).toEqual({
+        steps: 3,
+        attempts: 4,
+        retries: 1,
+        usage,
       });
+      expect(checkpoints).toMatchObject([
+        {
+          model: { steps: 1, attempts: 1, retries: 0, usage: {} },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 1, attempt: 1 },
+          },
+        },
+        {
+          model: { steps: 2, attempts: 2, retries: 0, usage: firstStepUsage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 2, attempt: 1 },
+          },
+        },
+        {
+          model: { steps: 2, attempts: 3, retries: 1, usage: firstStepUsage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 2, attempt: 2 },
+          },
+        },
+        {
+          model: { steps: 3, attempts: 4, retries: 1, usage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 3, attempt: 1 },
+          },
+        },
+      ]);
+      const recovered = await RunStore.open(result.runDirectory, {
+        mode: "recover",
+      });
+      expect(recovered.manifest.model).toEqual(result.manifest.model);
       expect(
         await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
       ).toBe(false);
