@@ -21,11 +21,15 @@ import {
   summarizeUsage,
 } from "./manifest.ts";
 import { compileNoteMarkdown } from "./markdown.ts";
+import {
+  accountModelAttempt,
+  accountModelStep,
+  createModelAccounting,
+} from "./model-accounting.ts";
 import type { RedactionOptions } from "./redact.ts";
 import { renderDocument } from "./renderer.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { readSession, type SessionEvent, SessionRecorder } from "./session.ts";
-import { accumulateStepUsage } from "./usage.ts";
 import { atomicWrite, isoWithOffset, sha256 } from "./utils.ts";
 
 export class NoteStateError extends Error {
@@ -86,7 +90,7 @@ export class RunStore {
       input: { path: `input/original${options.inputExtension}` },
       session: "session/events.jsonl",
       revisions: [],
-      model: { steps: 0, retries: 0, attempts: 0, usage: {} },
+      model: createModelAccounting(),
     });
     return store;
   }
@@ -644,12 +648,7 @@ function reconcileModelAccounting(
   confirmed: RunManifest["model"],
   events: SessionEvent[],
 ): RunManifest["model"] {
-  const model: RunManifest["model"] = {
-    steps: 0,
-    retries: 0,
-    attempts: 0,
-    usage: {},
-  };
+  let model = createModelAccounting();
   const matchesConfirmed = () =>
     isDeepStrictEqual(
       { ...model, usage: summarizeUsage(model.usage) },
@@ -663,13 +662,16 @@ function reconcileModelAccounting(
       usage?: Record<string, unknown>;
     } | null;
     if (event.type === "model.attempt.started") {
-      model.attempts++;
-      if ((data?.attempt ?? 0) > 1) model.retries++;
-      model.steps = Math.max(model.steps, data?.step ?? 0);
+      model = accountModelAttempt(model, {
+        step: data?.step ?? 0,
+        attempt: data?.attempt ?? 0,
+      });
     }
     if (event.type === "model.step.completed") {
-      model.steps = Math.max(model.steps, data?.step ?? 0);
-      model.usage = accumulateStepUsage(model.usage, data?.usage ?? {});
+      model = accountModelStep(model, {
+        step: data?.step ?? 0,
+        usage: data?.usage ?? {},
+      });
     }
     matched ||= matchesConfirmed();
   }

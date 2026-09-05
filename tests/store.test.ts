@@ -5,15 +5,12 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import sharp from "sharp";
-import {
-  type AgentUsage,
-  accumulateAgentUsage,
-  createAgentRunStats,
-} from "../src/agent.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import * as renderer from "../src/renderer.ts";
 import { readSession, SessionRecorder } from "../src/session.ts";
+import { RunState } from "../src/state.ts";
 import { RunStore } from "../src/store.ts";
+import type { TokenUsage } from "../src/usage.ts";
 import { sha256File } from "../src/utils.ts";
 import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
@@ -532,24 +529,21 @@ describe("session and recovery", () => {
     { name: "entirely missing usage", steps: [{}, {}], expected: {} },
   ] satisfies Array<{
     name: string;
-    steps: AgentUsage[];
-    expected: AgentUsage;
+    steps: TokenUsage[];
+    expected: TokenUsage;
   }>)(
     "preserves per-step usage through persistence and recovery: $name",
     async ({ steps, expected }) => {
       const store = await setup();
-      const stats = createAgentRunStats();
-      for (const [index, usage] of steps.entries()) {
-        const step = index + 1;
+      const state = new RunState();
+      for (const usage of steps) {
+        const step = state.beginModelStep();
+        state.beginModelAttempt({ step, attempt: 1 });
         store.recorder.record("model.attempt.started", { step, attempt: 1 });
+        state.completeModelStep(usage);
         store.recorder.record("model.step.completed", { step, usage });
-        accumulateAgentUsage(stats, usage);
-        await store.updateModel({
-          steps: step,
-          attempts: step,
-          usage: stats.usage,
-        });
-        expect(store.manifest.model.usage).toEqual(stats.usage);
+        await store.updateModel(state.modelAccounting);
+        expect(store.manifest.model.usage).toEqual(state.modelAccounting.usage);
       }
       expect(store.manifest.model.usage).toEqual(expected);
       await store.finish("model_stopped_no_revision");

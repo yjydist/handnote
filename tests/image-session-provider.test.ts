@@ -461,7 +461,6 @@ describe("session and provider transport", () => {
       { timeoutMs: 1_000, maxRetries: 0 },
       recorder,
       new RunState(),
-      { retries: 0, attempts: 0 },
       (async () =>
         new Response(
           JSON.stringify({
@@ -614,13 +613,11 @@ describe("session and provider transport", () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
     const state = new RunState();
-    const stats = { retries: 0, attempts: 0 };
     let calls = 0;
     const retrying = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 1 },
       recorder,
       state,
-      stats,
       (async () => {
         calls++;
         return new Response("", {
@@ -631,13 +628,17 @@ describe("session and provider transport", () => {
     );
     expect((await retrying("https://example.test")).status).toBe(200);
     expect(calls).toBe(2);
-    expect(stats.retries).toBe(1);
+    expect(state.modelAccounting).toEqual({
+      steps: 1,
+      retries: 1,
+      attempts: 2,
+      usage: {},
+    });
     calls = 0;
     const serverError = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 1 },
       recorder,
       state,
-      { retries: 0, attempts: 0 },
       (async () => {
         calls++;
         return new Response("", { status: calls === 1 ? 507 : 200 });
@@ -650,7 +651,6 @@ describe("session and provider transport", () => {
       { timeoutMs: 1_000, maxRetries: 2 },
       recorder,
       state,
-      { retries: 0, attempts: 0 },
       (async () => {
         calls++;
         return new Response("", { status: 401 });
@@ -658,18 +658,23 @@ describe("session and provider transport", () => {
     );
     expect((await auth("https://example.test")).status).toBe(401);
     expect(calls).toBe(1);
+    expect(state.modelAccounting).toEqual({
+      steps: 3,
+      retries: 2,
+      attempts: 5,
+      usage: {},
+    });
   });
 
   test("gives each timed-out attempt its own deadline", async () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
-    const stats = { retries: 0, attempts: 0 };
+    const state = new RunState();
     let calls = 0;
     const timingOut = createRetryingFetch(
       { timeoutMs: 10, maxRetries: 1 },
       recorder,
-      new RunState(),
-      stats,
+      state,
       (async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++;
         return await new Promise<Response>((_resolve, reject) => {
@@ -687,19 +692,23 @@ describe("session and provider transport", () => {
       kind: "provider_transient",
     });
     expect(calls).toBe(2);
-    expect(stats).toEqual({ retries: 1, attempts: 2 });
+    expect(state.modelAccounting).toEqual({
+      steps: 1,
+      retries: 1,
+      attempts: 2,
+      usage: {},
+    });
   });
 
   test("does not transport-retry a body stream after response start", async () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
-    const stats = { retries: 0, attempts: 0 };
+    const state = new RunState();
     let calls = 0;
     const retrying = createRetryingFetch(
       { timeoutMs: 10, maxRetries: 2 },
       recorder,
-      new RunState(),
-      stats,
+      state,
       (async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++;
         const stream = new ReadableStream({
@@ -719,7 +728,12 @@ describe("session and provider transport", () => {
       name: "TimeoutError",
     });
     expect(calls).toBe(1);
-    expect(stats).toEqual({ retries: 0, attempts: 1 });
+    expect(state.modelAccounting).toEqual({
+      steps: 1,
+      retries: 0,
+      attempts: 1,
+      usage: {},
+    });
   });
 
   test("classifies explicit capability failures", () => {

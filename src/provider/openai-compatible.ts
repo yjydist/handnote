@@ -275,12 +275,11 @@ export function promoteToolMedia(
 
 export const openAiCompatibleAdapter: ProviderAdapter = {
   protocol: "openai-compatible",
-  createModel({ config, recorder, state, stats, store }) {
+  createModel({ config, recorder, state, store }) {
     const transport = createRetryingFetch(
       config.model,
       recorder,
       state,
-      stats,
       fetch,
       repairToolArgumentResponse(recorder),
       store,

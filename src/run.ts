@@ -2,12 +2,12 @@ import { constants } from "node:fs";
 import { access, readdir, rm } from "node:fs/promises";
 import { basename, extname, relative, resolve } from "node:path";
 import sharp from "sharp";
-import { createAgentRunStats, runAgent } from "./agent.ts";
+import { runAgent } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
 import type { RunResult } from "./manifest.ts";
-import { createModel, type ProviderStats } from "./provider/index.ts";
+import { createModel } from "./provider/index.ts";
 import { checkedRunPath } from "./run-path.ts";
 import type { SessionRecorder } from "./session.ts";
 import { RunState } from "./state.ts";
@@ -122,8 +122,6 @@ export async function executeRun(
     );
   }
   const recorder = store.recorder;
-  const stats: ProviderStats = { retries: 0, attempts: 0 };
-  const agentStats = createAgentRunStats();
   const state = new RunState();
   let stopReason = "internal_error";
   let terminalError: HandnoteError | undefined;
@@ -147,7 +145,7 @@ export async function executeRun(
         state,
         recorder,
       });
-      const model = createModel({ config, recorder, state, stats, store });
+      const model = createModel({ config, recorder, state, store });
       const result = await runAgent({
         config,
         model,
@@ -156,7 +154,6 @@ export async function executeRun(
         sourceMimeType: input.mimeType,
         recorder,
         state,
-        stats: agentStats,
         store,
       });
       const hasRevision = Boolean(store.manifest.currentRevision);
@@ -189,12 +186,7 @@ export async function executeRun(
         recorder.record("cleanup.failed", { error: safeErrorMetadata(error) });
       }
     }
-    await store.updateModel({
-      steps: state.modelStep,
-      retries: stats.retries,
-      attempts: stats.attempts,
-      usage: agentStats.usage,
-    });
+    await store.updateModel(state.modelAccounting);
     const manifest = await store.finish(
       stopReason,
       terminalError
