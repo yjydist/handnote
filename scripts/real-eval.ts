@@ -5,7 +5,7 @@ import { basename, extname, resolve } from "node:path";
 import { Command } from "commander";
 import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
-import { noteDocumentSchema } from "../src/document.ts";
+import { compileNoteMarkdown } from "../src/markdown.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
 import { atomicWrite, sha256File } from "../src/utils.ts";
 
@@ -184,28 +184,36 @@ export async function inspectEvalAttempt(
     if (type === "note.finalized") finalizedEvent = true;
   }
 
-  const documentPath = `${manifest.runDirectory}/note.json`;
+  const documentPath = `${manifest.runDirectory}/note.md`;
   const imagePath = `${manifest.runDirectory}/note.png`;
   const hasDocument = await Bun.file(documentPath).exists();
   const hasImage = await Bun.file(imagePath).exists();
+  const revisionPath = manifest.final
+    ? `${manifest.runDirectory}/revisions/revision-${String(manifest.final.revision).padStart(3, "0")}.md`
+    : "";
+  const hasRevision = revisionPath
+    ? await Bun.file(revisionPath).exists()
+    : false;
   const artifactContract =
     manifest.status === "complete" || manifest.status === "partial"
-      ? hasDocument && hasImage
+      ? hasDocument && hasImage && hasRevision
       : !hasDocument && !hasImage;
   let schemaValid = false;
   let widthExact = false;
   let hashesValid = false;
-  if (hasDocument && hasImage && manifest.final) {
+  if (hasDocument && hasImage && hasRevision && manifest.final) {
     try {
-      noteDocumentSchema.parse(
-        JSON.parse(await readFile(documentPath, "utf8")),
-      );
+      const markdown = await readFile(documentPath, "utf8");
+      await compileNoteMarkdown(markdown, {
+        runDirectory: manifest.runDirectory,
+      });
       schemaValid = true;
       widthExact =
         (await sharp(imagePath).metadata()).width === configuredWidth;
       hashesValid =
-        (await sha256File(documentPath)) === manifest.final.documentSha256 &&
-        (await sha256File(imagePath)) === manifest.final.imageSha256;
+        (await sha256File(documentPath)) === manifest.final.markdownSha256 &&
+        (await sha256File(imagePath)) === manifest.final.imageSha256 &&
+        (await sha256File(revisionPath)) === manifest.final.markdownSha256;
     } catch {}
   }
   const sequenceMonotonic = events.every(
