@@ -328,9 +328,9 @@ describe("run controller", () => {
               store.path(`intermediate/revisions/0001/${file}`),
             ).exists(),
           ).toBe(true);
-        expect(
-          await Bun.file(store.path("intermediate/inspections")).exists(),
-        ).toBe(false);
+        expect(fsSync.existsSync(store.path("intermediate/inspections"))).toBe(
+          false,
+        );
         expect(await Bun.file(store.path("output/note.md")).exists()).toBe(
           expected === "complete",
         );
@@ -926,7 +926,7 @@ describe("run controller", () => {
       ).toBe(finalSha);
       expect(await sha256File(`${runDirectory}/output/note.md`)).toBe(finalSha);
       expect(
-        await Bun.file(`${runDirectory}/intermediate/inspections`).exists(),
+        fsSync.existsSync(`${runDirectory}/intermediate/inspections`),
       ).toBe(false);
       expect(
         (await stat(`${runDirectory}/intermediate/revisions`)).isDirectory(),
@@ -1237,7 +1237,7 @@ describe("run controller", () => {
     expect(code).toBe(1);
     expect(parsed.status).toBe("failed");
     expect(stdout.trim().split("\n")).toHaveLength(1);
-    expect(await Bun.file(output).exists()).toBe(false);
+    expect(fsSync.existsSync(output)).toBe(false);
   });
 
   test("truncated image CLI preflight creates no output and sends no Provider request", async () => {

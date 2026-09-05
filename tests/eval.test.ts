@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {
@@ -350,6 +351,6 @@ describe("real evaluation aggregation", () => {
       output,
     ]);
     expect(exitCode).toBe(1);
-    expect(await Bun.file(output).exists()).toBe(false);
+    expect(existsSync(output)).toBe(false);
   });
 });
