@@ -98,6 +98,91 @@ function reportForJobs(jobs: EvalJob[]): EvalReport {
 }
 
 describe("real evaluation aggregation", () => {
+  test.each([
+    { label: "normal key", secrets: ["sk-offline-key"], marker: "[REDACTED]" },
+    { label: "letter collision", secrets: ["A"], marker: "[SECRET_REMOVED]" },
+    { label: "bracket collision", secrets: ["["], marker: "***" },
+    { label: "all marker collisions", secrets: ["[", "*"], marker: "" },
+  ])(
+    "recognizes recorded redaction for $label without writes",
+    async ({ secrets, marker }) => {
+      const directory = await temporary();
+      const store = await createStoreFixture(directory, { secrets });
+      store.recorder.record("run.started", {
+        config: { model: { apiKey: secrets[0] } },
+        message: secrets.join(" / "),
+        nested: JSON.stringify({ apiKey: secrets[0] }),
+      });
+      await store.finish("model_stopped_no_revision");
+      const paths = [store.path("run.json"), store.recorder.path];
+      const before = await Promise.all(paths.map((path) => readFile(path)));
+      const inspected = await inspectEvalAttempt(
+        {
+          manifest: store.manifest,
+          runDirectory: directory,
+          manifestPath: store.path("run.json"),
+          exitCode: 1,
+        },
+        "fixture.png",
+      );
+      expect(inspected.contracts.sessionRedacted).toBe(true);
+      expect(inspected.contracts.hashesValid).toBe(true);
+      const event = (await readFile(store.recorder.path, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .find((item) => item.type === "run.started");
+      expect(event.data.config.model.apiKey).toBe(marker);
+      expect(event.data.message).toBe(secrets.map(() => marker).join(" / "));
+      expect(JSON.parse(event.data.nested)).toEqual({ apiKey: marker });
+      expect(await Promise.all(paths.map((path) => readFile(path)))).toEqual(
+        before,
+      );
+    },
+  );
+
+  test.each([
+    "sk-unredacted-key",
+    "A",
+    "[REDACTED]extra",
+    "[RED[SECRET_REMOVED]CTED]",
+    null,
+    42,
+    { marker: "[REDACTED]" },
+  ])("rejects unknown credential value %j without writes", async (apiKey) => {
+    const directory = await temporary();
+    const store = await createStoreFixture(directory);
+    store.recorder.record("run.started", {
+      config: { model: { apiKey: "key" } },
+    });
+    await store.finish("model_stopped_no_revision");
+    const events = (await readFile(store.recorder.path, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const started = events.find((event) => event.type === "run.started");
+    started.data.config.model.apiKey = apiKey;
+    await writeFile(
+      store.recorder.path,
+      `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    );
+    const paths = [store.path("run.json"), store.recorder.path];
+    const before = await Promise.all(paths.map((path) => readFile(path)));
+    const inspected = await inspectEvalAttempt(
+      {
+        manifest: store.manifest,
+        runDirectory: directory,
+        manifestPath: store.path("run.json"),
+        exitCode: 1,
+      },
+      "fixture.png",
+    );
+    expect(inspected.contracts.sessionRedacted).toBe(false);
+    expect(await Promise.all(paths.map((path) => readFile(path)))).toEqual(
+      before,
+    );
+  });
+
   test("retries failed and partial transient runs only", () => {
     expect(
       shouldRetryTransientRun({

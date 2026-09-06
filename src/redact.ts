@@ -6,6 +6,16 @@ const dataUrl = /^data:[^,]*;base64,/i;
 const standardBase64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const urlSafeBase64 = /^[A-Za-z0-9_-]+={0,2}$/;
 const maximumRecordedString = 64 * 1024;
+const credentialRedactionMarkers = [
+  "[REDACTED]",
+  "[SECRET_REMOVED]",
+  "***",
+  "",
+];
+
+export function isRedactedCredential(value: unknown): boolean {
+  return credentialRedactionMarkers.some((marker) => marker === value);
+}
 
 export interface RedactionOptions {
   secrets?: readonly string[];
@@ -30,7 +40,7 @@ export function redactionContext(options: RedactionOptions): RedactionContext {
     ),
   ].sort((left, right) => right.length - left.length);
   const replacement =
-    ["[REDACTED]", "[SECRET_REMOVED]", "***", ""].find((candidate) =>
+    credentialRedactionMarkers.find((candidate) =>
       secretVariants.every((secret) => !candidate.includes(secret)),
     ) ?? "";
   return { secretVariants, replacement };
@@ -139,7 +149,7 @@ export function redactValue(
   key: string,
   context: RedactionContext,
 ): unknown {
-  if (isCredentialKey(key)) return replaceSecrets("[REDACTED]", context);
+  if (isCredentialKey(key)) return context.replacement;
   if (typeof value === "string") {
     if (dataUrl.test(value) || looksLikeBase64(value))
       return replaceSecrets("[BASE64_REDACTED]", context);
