@@ -15,7 +15,6 @@ export { createRetryingFetch, requestFingerprint } from "./retry.ts";
 export type {
   ProviderAdapter,
   ProviderModelContext,
-  ProviderStats,
   RetryConfig,
 } from "./types.ts";
 

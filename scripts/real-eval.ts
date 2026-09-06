@@ -8,21 +8,24 @@ import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
 import type { RunResult } from "../src/manifest.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
+import { isRedactedCredential } from "../src/redact.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
 import { readSession } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
 import { atomicWrite } from "../src/utils.ts";
 
-export interface ContractChecks {
-  artifactContract: boolean;
-  finalizedEvent: boolean;
-  hashesValid: boolean;
-  schemaValid: boolean;
-  sequenceMonotonic: boolean;
-  sessionRedacted: boolean;
-  warningsFree: boolean;
-  widthExact: boolean;
-}
+const contractNames = [
+  "artifactContract",
+  "finalizedEvent",
+  "hashesValid",
+  "schemaValid",
+  "sequenceMonotonic",
+  "sessionRedacted",
+  "warningsFree",
+  "widthExact",
+] as const;
+
+export type ContractChecks = Record<(typeof contractNames)[number], boolean>;
 
 export interface RequestMetrics {
   attempts: number;
@@ -127,7 +130,8 @@ function hasUnredactedApiKey(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.entries(value).some(
     ([key, item]) =>
-      (key === "apiKey" && item !== "[REDACTED]") || hasUnredactedApiKey(item),
+      (key === "apiKey" && !isRedactedCredential(item)) ||
+      hasUnredactedApiKey(item),
   );
 }
 
@@ -312,16 +316,6 @@ export function summarizeEvalJobs(jobs: EvalJob[]): EvalSummary {
   const completeAttempts = attempts.filter(
     (attempt) => attempt.status === "complete",
   );
-  const contractNames = [
-    "artifactContract",
-    "finalizedEvent",
-    "hashesValid",
-    "schemaValid",
-    "sequenceMonotonic",
-    "sessionRedacted",
-    "warningsFree",
-    "widthExact",
-  ] as const;
   const contracts = Object.fromEntries(
     contractNames.map((name) => [
       name,
@@ -425,16 +419,7 @@ export function renderEvalReport(report: EvalReport): string {
     `All counts use ${summary.contracts.completeAttempts} complete attempt(s) as the denominator.`,
     "",
   );
-  for (const name of [
-    "artifactContract",
-    "finalizedEvent",
-    "hashesValid",
-    "schemaValid",
-    "sequenceMonotonic",
-    "sessionRedacted",
-    "warningsFree",
-    "widthExact",
-  ] as const)
+  for (const name of contractNames)
     lines.push(
       `- ${name}: ${summary.contracts[name]}/${summary.contracts.completeAttempts}`,
     );

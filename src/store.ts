@@ -21,11 +21,15 @@ import {
   summarizeUsage,
 } from "./manifest.ts";
 import { compileNoteMarkdown } from "./markdown.ts";
+import {
+  accountModelAttempt,
+  accountModelStep,
+  createModelAccounting,
+} from "./model-accounting.ts";
 import type { RedactionOptions } from "./redact.ts";
 import { renderDocument } from "./renderer.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { readSession, type SessionEvent, SessionRecorder } from "./session.ts";
-import { accumulateStepUsage } from "./usage.ts";
 import { atomicWrite, isoWithOffset, sha256 } from "./utils.ts";
 
 export class NoteStateError extends Error {
@@ -86,7 +90,7 @@ export class RunStore {
       input: { path: `input/original${options.inputExtension}` },
       session: "session/events.jsonl",
       revisions: [],
-      model: { steps: 0, retries: 0, attempts: 0, usage: {} },
+      model: createModelAccounting(),
     });
     return store;
   }
@@ -644,42 +648,52 @@ function reconcileModelAccounting(
   confirmed: RunManifest["model"],
   events: SessionEvent[],
 ): RunManifest["model"] {
-  const model: RunManifest["model"] = {
-    steps: 0,
-    retries: 0,
-    attempts: 0,
-    usage: {},
-  };
-  const matchesConfirmed = () =>
-    isDeepStrictEqual(
-      { ...model, usage: summarizeUsage(model.usage) },
-      confirmed,
-    );
-  let matched = matchesConfirmed();
-  for (const event of events) {
-    const data = event.data as {
-      step?: number;
-      attempt?: number;
-      usage?: Record<string, unknown>;
-    } | null;
-    if (event.type === "model.attempt.started") {
-      model.attempts++;
-      if ((data?.attempt ?? 0) > 1) model.retries++;
-      model.steps = Math.max(model.steps, data?.step ?? 0);
+  try {
+    let model = createModelAccounting();
+    const matchesConfirmed = () =>
+      isDeepStrictEqual(
+        { ...model, usage: summarizeUsage(model.usage) },
+        confirmed,
+      );
+    let matched = matchesConfirmed();
+    for (const event of events) {
+      const data = event.data as {
+        step?: number;
+        attempt?: number;
+        usage?: Record<string, unknown>;
+      } | null;
+      if (event.type === "model.attempt.started") {
+        model = accountModelAttempt(model, {
+          step: data?.step ?? 0,
+          attempt: data?.attempt ?? 0,
+        });
+      }
+      if (event.type === "model.step.completed") {
+        model = accountModelStep(model, {
+          step: data?.step ?? 0,
+          usage: data?.usage ?? {},
+        });
+      }
+      matched ||= matchesConfirmed();
     }
-    if (event.type === "model.step.completed") {
-      model.steps = Math.max(model.steps, data?.step ?? 0);
-      model.usage = accumulateStepUsage(model.usage, data?.usage ?? {});
-    }
-    matched ||= matchesConfirmed();
-  }
-  if (!matched)
+    if (!matched)
+      throw new HandnoteError(
+        "Recorded model accounting does not match any session event prefix",
+        "filesystem",
+      );
+    return runManifestSchema.shape.model.parse({
+      ...model,
+      usage: summarizeUsage(model.usage),
+    });
+  } catch (error) {
+    if (error instanceof HandnoteError) throw error;
     throw new HandnoteError(
-      "Recorded model accounting does not match any session event prefix",
+      "Session model events cannot produce valid model accounting",
       "filesystem",
+      false,
+      { cause: error },
     );
-  model.usage = summarizeUsage(model.usage);
-  return model;
+  }
 }
 
 async function flushFile(path: string): Promise<void> {

@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
-import {
-  accumulateAgentUsage,
-  createAgentRunStats,
-  runAgent,
-} from "../src/agent.ts";
+import { runAgent } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
 import type { createModel } from "../src/provider/index.ts";
 import { RunState } from "../src/state.ts";
@@ -29,35 +25,6 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: 0 },
 };
 
-test("accumulates completed-step usage including reasoning", () => {
-  const stats = createAgentRunStats();
-  accumulateAgentUsage(stats, {
-    inputTokens: 10,
-    outputTokens: 7,
-    totalTokens: 17,
-    cachedInputTokens: 6,
-    reasoningTokens: 5,
-  });
-  accumulateAgentUsage(stats, {
-    inputTokens: 20,
-    outputTokens: 4,
-    totalTokens: 24,
-    cachedInputTokens: 12,
-    reasoningTokens: 1,
-  });
-  expect(stats).toEqual({
-    completedSteps: 2,
-    usage: {
-      inputTokens: 30,
-      outputTokens: 11,
-      totalTokens: 41,
-      cachedInputTokens: 18,
-      reasoningTokens: 6,
-      textOutputTokens: 5,
-    },
-  });
-});
-
 test("runs an offline Mastra media tool loop and stops immediately after valid finalize", async () => {
   const directory = await mkdtemp(`${tmpdir()}/handnote-agent-`);
   directories.push(directory);
@@ -73,7 +40,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   const tools = createHandnoteTools({
     store,
     sourcePath,
-    runDirectory: directory,
     width: 700,
     maxSteps: 18,
     maxInspectCalls: 3,
@@ -138,9 +104,16 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     sourceMimeType: "image/png",
     recorder,
     state,
-    stats: createAgentRunStats(),
   });
   expect(result.steps).toBe(3);
+  expect(result.usage).toEqual({
+    inputTokens: 30,
+    outputTokens: 15,
+    totalTokens: 45,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    textOutputTokens: 15,
+  });
   expect(call).toBe(3);
   expect(state.finalized).toBe(true);
   expect(model.doGenerateCalls[2]?.prompt).toEqual(
@@ -156,77 +129,38 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   expect(JSON.stringify(toolMessages?.[1])).toContain('"type":"image-data"');
 }, 30_000);
 
-test("records a redacted stream error with its model step", async () => {
+test("records safe stream diagnostics and their model step", async () => {
   const directory = await mkdtemp(`${tmpdir()}/handnote-agent-error-`);
   directories.push(directory);
-  const sourcePath = `${directory}/original.png`;
-  await sharp({
-    create: { width: 80, height: 50, channels: 3, background: "white" },
-  })
-    .png()
-    .toFile(sourcePath);
-  const state = new RunState();
-  const store = await createStoreFixture(directory);
-  const recorder = store.recorder;
-  const tools = createHandnoteTools({
-    store,
-    sourcePath,
-    runDirectory: directory,
-    width: 700,
-    maxSteps: 18,
-    maxInspectCalls: 3,
-    toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-    state,
-    recorder,
-  });
-  const model = new MockLanguageModelV3({
-    modelId: "offline-timeout",
-    doGenerate: async () => {
-      state.beginModelStep();
-      throw new DOMException("secret request timed out", "TimeoutError");
-    },
-  });
-  const config: HandnoteConfig = {
-    model: {
-      provider: "openai-compatible",
-      baseUrl: "https://offline.invalid/v1",
-      apiKey: "offline",
-      name: "offline",
-      timeoutMs: 1_000,
-      maxRetries: 0,
-    },
-    prompt: { file: "prompt.md" },
-    maxSteps: 3,
-    maxInspectCalls: 3,
-    width: 700,
-    toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-    theme: "clean",
-    fontFamily: "sans-serif",
-    saveIntermediateImages: true,
-    configPath: `${directory}/config.yaml`,
-    promptPath: `${directory}/prompt.md`,
-    promptText: "Use the tools.",
-  };
-  await expect(
-    runAgent({
-      config,
-      model: model as unknown as ReturnType<typeof createModel>,
-      tools,
-      sourcePath,
-      sourceMimeType: "image/png",
-      recorder,
-      state,
-      stats: createAgentRunStats(),
-    }),
-  ).rejects.toMatchObject({
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "run",
+      "tests/fixtures/agent-stream-error.ts",
+      directory,
+    ],
+    { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  expect(code).toBe(0);
+  expect(stdout).not.toContain("sk-stream-error-secret");
+  expect(stderr).not.toContain("sk-stream-error-secret");
+  expect(stderr).toContain("provider_transient");
+  expect(stderr).toContain("TimeoutError");
+  expect(JSON.parse(stdout)).toEqual({
     kind: "provider_transient",
     message: "Provider request timed out",
   });
-  const events = (await readFile(recorder.path, "utf8"))
+  const session = await readFile(`${directory}/session/events.jsonl`, "utf8");
+  expect(session).not.toContain("sk-stream-error-secret");
+  const events = session
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  expect(events.map((event) => event.type)).toContain("model.stream.error");
   expect(
     events.find((event) => event.type === "model.stream.error")?.data,
   ).toEqual({
@@ -234,5 +168,4 @@ test("records a redacted stream error with its model step", async () => {
     kind: "provider_transient",
     message: "Provider request timed out",
   });
-  expect(JSON.stringify(events)).not.toContain("secret request");
 });

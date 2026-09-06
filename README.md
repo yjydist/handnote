@@ -48,6 +48,8 @@ handnote run page.jpg --config handnote.yaml --output ./runs --json
 
 Normal mode prints a short terminal status and run path. `--json` writes exactly one result object to stdout; diagnostics remain on stderr. Exit codes are `0` for complete, `2` for a usable partial result, and `1` when there is no artifact or an unrecoverable error.
 
+Agent Provider-error diagnostics retain error classification, HTTP status and model context, redact configured credentials, and omit raw SDK errors and request/response bodies.
+
 Each run directory is named with local time and a sanitized source stem. `run.json` uses `formatVersion: 1` and is created before the model starts. All artifact paths in it are relative to the run directory; the CLI JSON result separately reports the absolute `runDirectory`, `manifestPath`, current revision and available Markdown/PNG paths.
 
 ```text
@@ -73,7 +75,7 @@ Once the complete manifest is committed, later model, logging, inspection cleanu
 
 `RunStore.open(directory)` validates the manifest, committed files, actual Markdown resource references and matching event references without modifying the run. `RunStore.open(directory, {mode: "recover"})` additionally discards unconfirmed temporary/orphan artifacts and recovers an interrupted running run as partial or failed with stop reason `interrupted`. Managed paths inside the run must not contain symbolic links, even links to another location in the same run. Recovery checks paths and cleanup candidates before repairing the log or changing files. Neither API resumes the model. A run has one writer; tool mutations are serialized, and another process must not change the directory structure during an operation. A directory or success-shaped session event without a corresponding manifest reference is not a committed result. Historical, unversioned runs are not migrated and have no path aliases.
 
-Before any recovery writes, the manifest's model counters and usage must match the accumulated accounting at some prefix of the session log. Recovery then incorporates the remaining events without counting confirmed usage twice. Missing usage fields are distinct from zero. If no prefix matches, recovery reports a filesystem error and preserves the manifest, log (including any incomplete tail) and orphan artifacts for diagnosis. Read-only opening still provides the confirmed snapshot; a syntactically valid log can be missing a model event after a write failure.
+Before any recovery writes, the manifest's model counters and usage must match the accumulated accounting at some prefix of the session log. Recovery then incorporates the remaining events without counting confirmed usage twice and validates the resulting accounting against the manifest schema before repairing the log or cleaning artifacts. Missing usage fields are distinct from zero. If no prefix matches, or model events cannot produce valid, persistable accounting (for example, a malformed step or overflowing token total), recovery reports a filesystem error and preserves the manifest, log (including any incomplete tail) and orphan artifacts for diagnosis. This does not impose new payload schemas on historical events: omitted fields, previously tolerated values that yield valid accounting, and unrelated diagnostic payloads retain their existing treatment. Read-only opening still provides the confirmed snapshot; a syntactically valid log can be missing a model event after a write failure.
 
 The note and audit contracts are separate. `write_note` and `revise_note` accept `{markdown,audit}`. Markdown uses standard GFM, including links, footnotes and reference-style images, plus KaTeX math, Mermaid diagrams and sanitized HTML. Scripts and event attributes are removed; images reference captured files as `../assets/figures/figure-NNN.png`, relative to `output/note.md`, and are inlined. Images must be regular files; neither a figure nor any parent below the run root may be a symbolic link. Historical revisions retain the exact same Markdown bytes and use that same document base when compiled by Handnote. External media is not downloaded. Only blank or oversized text is rejected at the syntax boundary; successful compilation does not imply visible or complete content.
 
@@ -111,6 +113,8 @@ Read `run.json` first, then correlate `model.step.completed`, `model.attempt.*`,
 
 Session writes are synchronous and flushed. `SessionRecorder.create` exclusively creates a new log; `SessionRecorder.open` requires an existing log and continues its sequence. An existing run must have a nonempty log beginning with its `run.created` event. A missing or empty log is a filesystem error and never resets recorded usage. Recovery truncates only an incomplete last line after valid events and records that repair; invalid complete lines or duplicate sequences are errors. Ordinary session records and audit text recursively redact credential-like fields, Authorization values, URL credentials, and Base64 data. Manifest free text is also redacted, while its controlled paths, timestamps, states and hashes remain exact. The revision, review and finalize events referenced by the manifest preserve their integrity fields, including when an API key is a short placeholder. Media appears as `{path,mimeType,sha256,retained}` references.
 
+Credential object fields use the first marker containing no configured secret or its URL-encoded forms: `[REDACTED]`, `[SECRET_REMOVED]`, `***`, or the empty string. Evaluation recognizes this same finite set for `apiKey` values and rejects other values. It remains read-only: historical logs are not rewritten, and older composite markers such as `[RED[SECRET_REMOVED]CTED]` continue to report `sessionRedacted: false` because they are outside the canonical marker contract.
+
 An append or flush failure disables that recorder: subsequent event writes report the original filesystem failure without touching the log. The failed operation leaves any partial or complete event in place, since a write error does not prove that no bytes were appended. Open the run in recovery mode to validate the log and obtain a new recorder; complete events determine the next sequence, and an incomplete tail follows the repair rule above. Even a complete revision or finalize event confirms no artifact without its manifest reference.
 
 ## Development
@@ -120,5 +124,7 @@ bun test
 bun run typecheck
 bun run check
 ```
+
+The [offline checks workflow](.github/workflows/ci.yml) runs these commands for pull requests targeting `dev` and pushes to `dev`. On Linux, use `bunx playwright install --with-deps chromium` to install Chromium and its system dependencies. No personal `config.yaml`, Provider credentials, or local `data/` are required.
 
 Tests are offline and must not call a real Provider. The MVP intentionally omits multiple images/models, OCR, human approval, resume/replay, remote tracing, Mastra Memory/Storage/Workflow, and compatibility migrations.

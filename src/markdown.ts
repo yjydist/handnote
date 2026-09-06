@@ -14,9 +14,11 @@ import { unified } from "unified";
 import { SKIP, visit } from "unist-util-visit";
 import { HandnoteError } from "./errors.ts";
 import type { Artifact } from "./manifest.ts";
-import type { LayoutWarning } from "./renderer.ts";
+import type { LayoutWarning, NoteStructure } from "./render-metadata.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { sha256 } from "./utils.ts";
+
+export type { NoteStructure } from "./render-metadata.ts";
 
 export const maxMarkdownLength = 200_000;
 
@@ -38,15 +40,6 @@ export class MarkdownValidationError extends Error {
     );
     this.name = "MarkdownValidationError";
   }
-}
-
-export interface NoteStructure {
-  headings: number;
-  blocks: number;
-  tables: number;
-  equations: number;
-  diagrams: number;
-  figures: number;
 }
 
 export interface CompiledNote {

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { HandnoteError } from "../src/errors.ts";
+import { createModelPreviews, displayMetadata } from "../src/image.ts";
 import { executeRun, validateInput } from "../src/run.ts";
 import { readSession, SessionRecorder } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
@@ -176,9 +177,14 @@ describe("run controller", () => {
     }
   });
 
-  test.each(["a", "1"])(
+  test.each([
+    ["a", "[REDACTED]"],
+    ["1", "[REDACTED]"],
+    ["A", "[SECRET_REMOVED]"],
+    ["[", "***"],
+  ])(
     "completes and reopens with short API key %s while redacting free text",
-    async (apiKey) => {
+    async (apiKey, marker) => {
       const directory = await temporary();
       const draft = simpleDraft();
       draft.audit.uncertainties.push({
@@ -250,7 +256,7 @@ describe("run controller", () => {
         expect(commit.audit.uncertainties[0]?.basis).not.toBe(
           `credential=${apiKey}`,
         );
-        expect(commit.audit.uncertainties[0]?.basis).toContain("[REDACTED]");
+        expect(commit.audit.uncertainties[0]?.basis).toContain(marker);
         expect(await sha256File(`${result.runDirectory}/output/note.md`)).toBe(
           revision.markdown.sha256,
         );
@@ -327,9 +333,9 @@ describe("run controller", () => {
               store.path(`intermediate/revisions/0001/${file}`),
             ).exists(),
           ).toBe(true);
-        expect(
-          await Bun.file(store.path("intermediate/inspections")).exists(),
-        ).toBe(false);
+        expect(fsSync.existsSync(store.path("intermediate/inspections"))).toBe(
+          false,
+        );
         expect(await Bun.file(store.path("output/note.md")).exists()).toBe(
           expected === "complete",
         );
@@ -725,6 +731,53 @@ describe("run controller", () => {
     }
   });
 
+  test("preserves EXIF display orientation and original input bytes during validation", async () => {
+    const directory = await temporary();
+    const path = `${directory}/rotated.jpg`;
+    const original = await sharp({
+      create: { width: 20, height: 10, channels: 3, background: "white" },
+    })
+      .withMetadata({ orientation: 6 })
+      .jpeg()
+      .toBuffer();
+    await writeFile(path, original);
+
+    expect(await validateInput(path)).toMatchObject({ mimeType: "image/jpeg" });
+    expect((await readFile(path)).equals(original)).toBe(true);
+    expect(await displayMetadata(path)).toEqual({
+      width: 10,
+      height: 20,
+      mimeType: "image/jpeg",
+    });
+    expect(
+      await createModelPreviews(path, { maxEdge: 2048, jpegQuality: 85 }),
+    ).toMatchObject([{ width: 10, height: 20 }]);
+  });
+
+  test("rejects truncated image pixels even when the PNG header is readable", async () => {
+    const directory = await temporary();
+    const path = `${directory}/truncated.png`;
+    const original = await sharp({
+      create: { width: 100, height: 60, channels: 3, background: "white" },
+    })
+      .png()
+      .toBuffer();
+    await writeFile(
+      path,
+      original.subarray(0, Math.floor(original.length / 2)),
+    );
+
+    expect(await displayMetadata(path)).toEqual({
+      width: 100,
+      height: 60,
+      mimeType: "image/png",
+    });
+    await expect(validateInput(path)).rejects.toMatchObject({
+      kind: "validation",
+      message: expect.stringContaining("Input is not a readable image"),
+    });
+  });
+
   test("rejects unsupported decoded formats and extension mismatches", async () => {
     const directory = await temporary();
     const mismatch = `${directory}/jpeg-named-png.png`;
@@ -878,7 +931,7 @@ describe("run controller", () => {
       ).toBe(finalSha);
       expect(await sha256File(`${runDirectory}/output/note.md`)).toBe(finalSha);
       expect(
-        await Bun.file(`${runDirectory}/intermediate/inspections`).exists(),
+        fsSync.existsSync(`${runDirectory}/intermediate/inspections`),
       ).toBe(false);
       expect(
         (await stat(`${runDirectory}/intermediate/revisions`)).isDirectory(),
@@ -1026,61 +1079,118 @@ describe("run controller", () => {
     }
   }, 30_000);
 
-  test("writes a failed manifest and no note after authentication rejection", async () => {
-    const directory = await temporary();
-    const apiKey = "sk-authentication-secret";
-    const server = Bun.serve({
-      port: 0,
-      fetch: () =>
-        Response.json(
-          {
-            error: {
-              message: `invalid API key ${apiKey}`,
-              type: "authentication",
+  test.each([false, true])(
+    "keeps authentication diagnostics safe with JSON mode %s",
+    async (json) => {
+      const directory = await temporary();
+      const apiKey = "sk-authentication-secret";
+      const server = Bun.serve({
+        port: 0,
+        fetch: () =>
+          Response.json(
+            {
+              error: {
+                message: `invalid API key ${apiKey}`,
+                type: "authentication",
+              },
             },
-          },
-          { status: 401 },
-        ),
-    });
-    try {
-      const input = await writeRunInputs(directory, `${server.url}v1`, apiKey);
-      const result = await executeRun(
-        input,
-        `${directory}/config.yaml`,
-        `${directory}/runs`,
-      );
-      expect(result.manifest.status).toBe("failed");
-      expect(result.exitCode).toBe(1);
-      expect(result.manifest.error?.kind).toBe("authentication");
-      expect(await Bun.file(`${result.runDirectory}/run.json`).exists()).toBe(
-        true,
-      );
-      expect(
-        await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
-      ).toBe(false);
-      const session = await readFile(
-        `${result.runDirectory}/session/events.jsonl`,
-        "utf8",
-      );
-      expect(session).not.toContain(apiKey);
-      expect(session).not.toContain("responseBody");
-      expect(session).not.toContain("requestBodyValues");
-      expect(session).toContain('"statusCode":401');
-    } finally {
-      server.stop(true);
-    }
-  });
+            { status: 401 },
+          ),
+      });
+      try {
+        const input = await writeRunInputs(
+          directory,
+          `${server.url}v1`,
+          apiKey,
+        );
+        const child = Bun.spawn(
+          [
+            process.execPath,
+            "run",
+            "src/cli.ts",
+            "run",
+            input,
+            "--config",
+            `${directory}/config.yaml`,
+            "--output",
+            `${directory}/runs`,
+            ...(json ? ["--json"] : []),
+          ],
+          { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+        );
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+        expect(code).toBe(1);
+        expect(stdout).not.toContain(apiKey);
+        expect(stderr).not.toContain(apiKey);
+        expect(stderr).not.toContain("responseBody");
+        expect(stderr).not.toContain("requestBodyValues");
+        expect(stderr).toContain("authentication");
+        expect(stderr).toContain("401");
+        expect(stdout.trim().split("\n")).toHaveLength(1);
+        const [runName] = await readdir(`${directory}/runs`);
+        const runDirectory = `${directory}/runs/${runName}`;
+        const manifestText = await readFile(`${runDirectory}/run.json`, "utf8");
+        expect(manifestText).not.toContain(apiKey);
+        expect(JSON.parse(manifestText)).toMatchObject({
+          status: "failed",
+          stopReason: "authentication",
+          error: { kind: "authentication" },
+        });
+        if (json)
+          expect(JSON.parse(stdout)).toMatchObject({
+            status: "failed",
+            exitCode: 1,
+            runDirectory,
+            error: { kind: "authentication" },
+          });
+        else expect(stdout.trim()).toBe(`failed: ${runDirectory}`);
+        expect(await Bun.file(`${runDirectory}/output/note.md`).exists()).toBe(
+          false,
+        );
+        const session = await readFile(
+          `${runDirectory}/session/events.jsonl`,
+          "utf8",
+        );
+        expect(session).not.toContain(apiKey);
+        expect(session).not.toContain("responseBody");
+        expect(session).not.toContain("requestBodyValues");
+        expect(session).toContain('"statusCode":401');
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
 
   test("retains a valid revision as partial after a later authentication failure", async () => {
     const directory = await temporary();
+    const runs = `${directory}/runs`;
+    const checkpoints: unknown[] = [];
     let requests = 0;
     const server = Bun.serve({
       port: 0,
-      fetch: () => {
+      fetch: async () => {
+        const [runName] = await readdir(runs);
+        const runDirectory = `${runs}/${runName}`;
+        checkpoints.push({
+          model: JSON.parse(await readFile(`${runDirectory}/run.json`, "utf8"))
+            .model,
+          event: readSession(`${runDirectory}/session/events.jsonl`).events.at(
+            -1,
+          ),
+        });
         requests++;
         if (requests === 1)
           return completion("write_note", simpleDraft(), requests);
-        if (requests === 2) return completion("review_render", {}, requests);
+        if (requests === 2)
+          return new Response("", {
+            status: 429,
+            headers: { "retry-after": "0" },
+          });
+        if (requests === 3) return completion("review_render", {}, 2);
         return Response.json(
           { error: { message: "invalid API key", type: "authentication" } },
           { status: 401 },
@@ -1093,24 +1203,77 @@ describe("run controller", () => {
         `${server.url}v1`,
         "offline",
       );
-      const result = await executeRun(
-        input,
-        `${directory}/config.yaml`,
-        `${directory}/runs`,
+      const configPath = `${directory}/config.yaml`;
+      await writeFile(
+        configPath,
+        (await readFile(configPath, "utf8")).replace(
+          "maxRetries: 0",
+          "maxRetries: 1",
+        ),
       );
+      const result = await executeRun(input, configPath, runs);
       expect(result.manifest.status).toBe("partial");
       expect(result.exitCode).toBe(2);
       expect(result.manifest.stopReason).toBe("authentication");
       expect(result.manifest.error?.kind).toBe("authentication");
       expect(result.manifest.currentRevision).toBe(1);
       expect(result.manifest.final).toBeUndefined();
-      expect(result.manifest.model.usage).toMatchObject({
+      const firstStepUsage = {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 10,
+        cacheHitRate: 0,
+      };
+      const usage = {
         inputTokens: 20,
         outputTokens: 10,
         totalTokens: 30,
         cachedInputTokens: 8,
         uncachedInputTokens: 12,
+        cacheHitRate: 0.4,
+      };
+      expect(result.manifest.model).toEqual({
+        steps: 3,
+        attempts: 4,
+        retries: 1,
+        usage,
       });
+      expect(checkpoints).toMatchObject([
+        {
+          model: { steps: 1, attempts: 1, retries: 0, usage: {} },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 1, attempt: 1 },
+          },
+        },
+        {
+          model: { steps: 2, attempts: 2, retries: 0, usage: firstStepUsage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 2, attempt: 1 },
+          },
+        },
+        {
+          model: { steps: 2, attempts: 3, retries: 1, usage: firstStepUsage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 2, attempt: 2 },
+          },
+        },
+        {
+          model: { steps: 3, attempts: 4, retries: 1, usage },
+          event: {
+            type: "model.attempt.started",
+            data: { step: 3, attempt: 1 },
+          },
+        },
+      ]);
+      const recovered = await RunStore.open(result.runDirectory, {
+        mode: "recover",
+      });
+      expect(recovered.manifest.model).toEqual(result.manifest.model);
       expect(
         await Bun.file(`${result.runDirectory}/output/note.md`).exists(),
       ).toBe(false);
@@ -1148,8 +1311,78 @@ describe("run controller", () => {
     expect(code).toBe(1);
     expect(parsed.status).toBe("failed");
     expect(stdout.trim().split("\n")).toHaveLength(1);
-    expect(await Bun.file(output).exists()).toBe(false);
+    expect(fsSync.existsSync(output)).toBe(false);
   });
+
+  test("truncated image CLI preflight creates no output and sends no Provider request", async () => {
+    const directory = await temporary();
+    const output = `${directory}/runs`;
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => {
+        requests++;
+        return Response.json(
+          { error: { message: "invalid image content" } },
+          { status: 400 },
+        );
+      },
+    });
+    try {
+      const input = await writeRunInputs(
+        directory,
+        `${server.url}v1`,
+        "offline",
+      );
+      const original = await readFile(input);
+      await writeFile(
+        input,
+        original.subarray(0, Math.floor(original.length / 2)),
+      );
+      const child = Bun.spawn(
+        [
+          "bun",
+          "run",
+          "src/cli.ts",
+          "run",
+          input,
+          "--config",
+          `${directory}/config.yaml`,
+          "--output",
+          output,
+          "--json",
+        ],
+        { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" },
+      );
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      expect(code).toBe(1);
+      expect(stdout.trim().split("\n")).toHaveLength(1);
+      expect({
+        result: JSON.parse(stdout),
+        requests,
+        outputExists: fsSync.existsSync(output),
+      }).toEqual({
+        result: {
+          status: "failed",
+          exitCode: 1,
+          stopReason: "validation",
+          error: {
+            kind: "validation",
+            message: expect.stringContaining("Input is not a readable image"),
+          },
+        },
+        requests: 0,
+        outputExists: false,
+      });
+      expect(stderr).toBe("");
+    } finally {
+      server.stop(true);
+    }
+  }, 30_000);
 
   test("reports output initialization failures as filesystem errors", async () => {
     const directory = await temporary();
