@@ -648,40 +648,52 @@ function reconcileModelAccounting(
   confirmed: RunManifest["model"],
   events: SessionEvent[],
 ): RunManifest["model"] {
-  let model = createModelAccounting();
-  const matchesConfirmed = () =>
-    isDeepStrictEqual(
-      { ...model, usage: summarizeUsage(model.usage) },
-      confirmed,
-    );
-  let matched = matchesConfirmed();
-  for (const event of events) {
-    const data = event.data as {
-      step?: number;
-      attempt?: number;
-      usage?: Record<string, unknown>;
-    } | null;
-    if (event.type === "model.attempt.started") {
-      model = accountModelAttempt(model, {
-        step: data?.step ?? 0,
-        attempt: data?.attempt ?? 0,
-      });
+  try {
+    let model = createModelAccounting();
+    const matchesConfirmed = () =>
+      isDeepStrictEqual(
+        { ...model, usage: summarizeUsage(model.usage) },
+        confirmed,
+      );
+    let matched = matchesConfirmed();
+    for (const event of events) {
+      const data = event.data as {
+        step?: number;
+        attempt?: number;
+        usage?: Record<string, unknown>;
+      } | null;
+      if (event.type === "model.attempt.started") {
+        model = accountModelAttempt(model, {
+          step: data?.step ?? 0,
+          attempt: data?.attempt ?? 0,
+        });
+      }
+      if (event.type === "model.step.completed") {
+        model = accountModelStep(model, {
+          step: data?.step ?? 0,
+          usage: data?.usage ?? {},
+        });
+      }
+      matched ||= matchesConfirmed();
     }
-    if (event.type === "model.step.completed") {
-      model = accountModelStep(model, {
-        step: data?.step ?? 0,
-        usage: data?.usage ?? {},
-      });
-    }
-    matched ||= matchesConfirmed();
-  }
-  if (!matched)
+    if (!matched)
+      throw new HandnoteError(
+        "Recorded model accounting does not match any session event prefix",
+        "filesystem",
+      );
+    return runManifestSchema.shape.model.parse({
+      ...model,
+      usage: summarizeUsage(model.usage),
+    });
+  } catch (error) {
+    if (error instanceof HandnoteError) throw error;
     throw new HandnoteError(
-      "Recorded model accounting does not match any session event prefix",
+      "Session model events cannot produce valid model accounting",
       "filesystem",
+      false,
+      { cause: error },
     );
-  model.usage = summarizeUsage(model.usage);
-  return model;
+  }
 }
 
 async function flushFile(path: string): Promise<void> {

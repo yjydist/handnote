@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
 import type { RunResult } from "../src/manifest.ts";
 import { compileNoteMarkdown } from "../src/markdown.ts";
+import { isRedactedCredential } from "../src/redact.ts";
 import { executeRun, type RunManifest, type RunStatus } from "../src/run.ts";
 import { readSession } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
@@ -129,7 +130,8 @@ function hasUnredactedApiKey(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.entries(value).some(
     ([key, item]) =>
-      (key === "apiKey" && item !== "[REDACTED]") || hasUnredactedApiKey(item),
+      (key === "apiKey" && !isRedactedCredential(item)) ||
+      hasUnredactedApiKey(item),
   );
 }
 

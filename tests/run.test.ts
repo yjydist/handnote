@@ -177,9 +177,14 @@ describe("run controller", () => {
     }
   });
 
-  test.each(["a", "1"])(
+  test.each([
+    ["a", "[REDACTED]"],
+    ["1", "[REDACTED]"],
+    ["A", "[SECRET_REMOVED]"],
+    ["[", "***"],
+  ])(
     "completes and reopens with short API key %s while redacting free text",
-    async (apiKey) => {
+    async (apiKey, marker) => {
       const directory = await temporary();
       const draft = simpleDraft();
       draft.audit.uncertainties.push({
@@ -251,7 +256,7 @@ describe("run controller", () => {
         expect(commit.audit.uncertainties[0]?.basis).not.toBe(
           `credential=${apiKey}`,
         );
-        expect(commit.audit.uncertainties[0]?.basis).toContain("[REDACTED]");
+        expect(commit.audit.uncertainties[0]?.basis).toContain(marker);
         expect(await sha256File(`${result.runDirectory}/output/note.md`)).toBe(
           revision.markdown.sha256,
         );
