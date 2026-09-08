@@ -86,9 +86,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
     );
   if (statusCode !== undefined && isRetryableStatus(statusCode))
     return new HandnoteError(
-      statusCode === undefined
-        ? "Provider request failed temporarily"
-        : `Provider request failed temporarily (HTTP ${statusCode})`,
+      `Provider request failed temporarily (HTTP ${statusCode})`,
       "provider_transient",
       true,
       { cause: error },
