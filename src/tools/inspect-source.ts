@@ -5,7 +5,7 @@ import {
   inspectSource,
   normalizeInspectInput,
 } from "../image.ts";
-import { type ToolRuntime, toolError } from "./shared.ts";
+import { type ToolRuntime, toolError, toolErrorSchema } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
 export function createInspectSourceTool(
@@ -33,12 +33,9 @@ export function createInspectSourceTool(
         kind: z.enum(["crop", "contact_sheet"]),
         summary: z.string(),
       }),
-      z.object({
-        ok: z.literal(false),
-        error: z.object({
+      toolErrorSchema.extend({
+        error: toolErrorSchema.shape.error.extend({
           code: z.literal("inspection_budget_exhausted"),
-          message: z.string(),
-          repairable: z.literal(true),
         }),
         summary: z.string(),
       }),

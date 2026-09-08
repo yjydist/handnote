@@ -3,7 +3,12 @@ import { z } from "zod";
 import { MarkdownValidationError } from "../markdown.ts";
 import { NoteStateError } from "../store.ts";
 import type { ToolRuntime } from "./shared.ts";
-import { layoutSummary, remainingSteps, toolError } from "./shared.ts";
+import {
+  layoutSummary,
+  remainingSteps,
+  toolError,
+  toolErrorSchema,
+} from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
 export const noteRevisionOutputSchema = z.union([
@@ -14,14 +19,7 @@ export const noteRevisionOutputSchema = z.union([
     warnings: z.array(z.unknown()),
     summary: z.string(),
   }),
-  z.object({
-    ok: z.literal(false),
-    error: z.object({
-      code: z.string(),
-      message: z.string(),
-      repairable: z.literal(true),
-    }),
-  }),
+  toolErrorSchema,
 ]);
 
 export const noteDraftInputSchema = z
@@ -37,14 +35,7 @@ export const noteDraftInputSchema = z
   })
   .strict();
 
-export interface NoteToolSuccess {
-  ok: true;
-  revision: number;
-  markdownSha256: string;
-  warnings: unknown[];
-  summary: string;
-}
-export type NoteToolResult = NoteToolSuccess | ReturnType<typeof toolError>;
+export type NoteToolResult = z.infer<typeof noteRevisionOutputSchema>;
 
 export async function commitNoteDraft(
   context: ToolContext,

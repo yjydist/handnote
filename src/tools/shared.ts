@@ -1,11 +1,24 @@
+import { z } from "zod";
 import { asError, HandnoteError } from "../errors.ts";
 import { createModelPreviews } from "../image.ts";
 
 import type { ToolContext } from "./types.ts";
 
-export const toolError = (code: string, message: string) => ({
-  ok: false as const,
-  error: { code, message, repairable: true as const },
+export const toolErrorSchema = z.object({
+  ok: z.literal(false),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    repairable: z.literal(true),
+  }),
+});
+
+export const toolError = (
+  code: string,
+  message: string,
+): z.infer<typeof toolErrorSchema> => ({
+  ok: false,
+  error: { code, message, repairable: true },
 });
 
 export function remainingSteps(context: ToolContext): string {

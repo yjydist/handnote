@@ -2,7 +2,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { NoteStateError } from "../store.ts";
 import type { ToolRuntime } from "./shared.ts";
-import { toolError } from "./shared.ts";
+import { toolError, toolErrorSchema } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
 export function createFinalizeNoteTool(
@@ -21,14 +21,7 @@ export function createFinalizeNoteTool(
         markdownSha256: z.string(),
         summary: z.string(),
       }),
-      z.object({
-        ok: z.literal(false),
-        error: z.object({
-          code: z.string(),
-          message: z.string(),
-          repairable: z.literal(true),
-        }),
-      }),
+      toolErrorSchema,
     ]),
     execute: async () => {
       try {

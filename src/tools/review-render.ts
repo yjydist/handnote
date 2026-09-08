@@ -3,7 +3,12 @@ import { z } from "zod";
 import { createModelPreviews } from "../image.ts";
 import { NoteStateError } from "../store.ts";
 import type { ToolRuntime } from "./shared.ts";
-import { layoutSummary, remainingSteps, toolError } from "./shared.ts";
+import {
+  layoutSummary,
+  remainingSteps,
+  toolError,
+  toolErrorSchema,
+} from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
 export function createReviewRenderTool(
@@ -26,13 +31,7 @@ export function createReviewRenderTool(
         structure: z.record(z.string(), z.number()),
         summary: z.string(),
       }),
-      z.object({
-        ok: z.literal(false),
-        error: z.object({
-          code: z.string(),
-          message: z.string(),
-          repairable: z.literal(true),
-        }),
+      toolErrorSchema.extend({
         summary: z.string().optional(),
       }),
     ]),
