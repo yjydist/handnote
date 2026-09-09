@@ -19,6 +19,7 @@
     "src/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts",
-    "packages/renderer/**/*.ts"
+    "packages/renderer/**/*.ts",
+    "packages/ink/**/*.ts"
   ]
 }

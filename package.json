@@ -22,7 +22,8 @@
     "yaml": "2.8.1",
     "zod": "4.1.12",
     "@handnote/renderer": "workspace:*",
-    "@ai-sdk/provider": "4.0.7"
+    "@ai-sdk/provider": "4.0.7",
+    "@handnote/ink": "workspace:*"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
@@ -34,6 +35,7 @@
     "bun": ">=1.4.0 <1.5.0"
   },
   "workspaces": [
-    "packages/renderer"
+    "packages/renderer",
+    "packages/ink"
   ]
 }
