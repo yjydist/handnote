@@ -119,12 +119,14 @@ An append or flush failure disables that recorder: subsequent event writes repor
 
 ## Development
 
+Application code, business handlers, run storage, recovery, and evaluation live in `apps/handnote`. The private `@handnote/agent`, `@handnote/renderer`, and `@handnote/ink` workspaces expose their own package entries. The root `src/cli.ts` and `scripts/real-eval.ts` forward to the application package, so existing commands remain valid. `prompts/handnote.md` retains the default prompt path through a link to the Agent package.
+
 ```sh
 bun test
 bun run typecheck
 bun run check
 ```
 
-The [offline checks workflow](.github/workflows/ci.yml) runs these commands for pull requests targeting `dev` and pushes to `dev`. On Linux, use `bunx playwright install --with-deps chromium` to install Chromium and its system dependencies. No personal `config.yaml`, Provider credentials, or local `data/` are required.
+The [offline checks workflow](.github/workflows/ci.yml) runs these commands for pull requests and pushes targeting `dev` or `v1.3.0`. On Linux, use `bunx playwright install --with-deps chromium` to install Chromium and its system dependencies. No personal `config.yaml`, Provider credentials, or local `data/` are required.
 
 Tests are offline and must not call a real Provider. The MVP intentionally omits multiple images/models, OCR, human approval, resume/replay, remote tracing, Mastra Memory/Storage/Workflow, and compatibility migrations.

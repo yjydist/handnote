@@ -32,6 +32,6 @@ bun experiments/ink/review-cases.ts --prepared runs/ink-experiments/my-input --a
 
 这些命令保留既有产物，生成文件位于 Git 忽略的 `runs/`。复现时需要原始开发数据以及对应 OCR 输入图片；原始 OCR 记录包含绝对图片路径，移动实验目录后应重新运行 OCR。锁定模型、依赖、固定小型 OCR 测试结果及实验代码随仓库提交，大型模型和运行产物不提交。
 
-普通应用仍通过现有入口工作。包入口分别为 `@handnote/renderer` 与 `@handnote/ink`，图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，也没有拆分 Agent 或升级生产存储格式。
+普通应用在 `apps/handnote`，仍通过根兼容入口工作。模型循环归 `@handnote/agent`，渲染与笔迹分别由 `@handnote/renderer`、`@handnote/ink` 提供；来源匹配通过应用的 `@handnote/app/ink-matching` 入口调用。图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，未升级生产存储格式。
 
 首轮实测见 [RESULTS.md](RESULTS.md)；第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配，覆盖可能进一步下降。

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { matchInkSources } from "@handnote/app/ink-matching";
 import { associateInk, parseInkJson, renderInkSvg } from "@handnote/ink";
 import {
   type InkReplacement,
@@ -9,7 +10,6 @@ import {
 } from "@handnote/renderer";
 import sharp from "sharp";
 import { z } from "zod";
-import { matchInkSources } from "../../src/ink-matching.ts";
 import development from "./development.json";
 
 const hash = (value: string | Uint8Array) =>

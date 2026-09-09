@@ -52,7 +52,7 @@ describe("configuration", () => {
 
   test("production prompt enforces faithful content and session-only audit", async () => {
     const prompt = await readFile(
-      new URL("../prompts/handnote.md", import.meta.url),
+      new URL("../../../prompts/handnote.md", import.meta.url),
       "utf8",
     );
     expect(prompt).toContain("never summarize, compress, omit, evaluate");

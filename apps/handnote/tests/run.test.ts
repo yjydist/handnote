@@ -470,7 +470,7 @@ describe("run controller", () => {
             "bun",
             "--preload",
             faultPath,
-            "src/cli.ts",
+            "../../src/cli.ts",
             "run",
             input,
             "--config",
@@ -1107,7 +1107,7 @@ describe("run controller", () => {
           [
             process.execPath,
             "run",
-            "src/cli.ts",
+            "../../src/cli.ts",
             "run",
             input,
             "--config",
@@ -1292,7 +1292,7 @@ describe("run controller", () => {
       [
         "bun",
         "run",
-        "src/cli.ts",
+        "../../src/cli.ts",
         "run",
         `${directory}/missing.png`,
         "--config",
@@ -1343,7 +1343,7 @@ describe("run controller", () => {
         [
           "bun",
           "run",
-          "src/cli.ts",
+          "../../src/cli.ts",
           "run",
           input,
           "--config",
@@ -1397,7 +1397,7 @@ describe("run controller", () => {
       [
         "bun",
         "run",
-        "src/cli.ts",
+        "../../src/cli.ts",
         "run",
         input,
         "--config",
@@ -1423,11 +1423,14 @@ describe("run controller", () => {
 
   test("top-level and run help exit successfully", async () => {
     for (const args of [["--help"], ["run", "--help"]]) {
-      const processResult = Bun.spawn(["bun", "run", "src/cli.ts", ...args], {
-        cwd: `${import.meta.dir}/..`,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+      const processResult = Bun.spawn(
+        ["bun", "run", "../../src/cli.ts", ...args],
+        {
+          cwd: `${import.meta.dir}/..`,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
       const [stdout, stderr, code] = await Promise.all([
         new Response(processResult.stdout).text(),
         new Response(processResult.stderr).text(),
