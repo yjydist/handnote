@@ -14,10 +14,33 @@ const relativePath = z
         .every((part) => part !== ".." && part !== "." && part !== ""),
     "Artifact paths must be relative to the run directory",
   );
-const artifactSchema = z
+export const artifactSchema = z
   .object({ path: relativePath, sha256: z.string().regex(/^[a-f0-9]{64}$/) })
   .strict();
 export type Artifact = z.infer<typeof artifactSchema>;
+export const inkSourceSchema = z
+  .object({
+    points: artifactSchema,
+    originalRelation: z.literal("unknown"),
+    redraw: z
+      .object({
+        svg: artifactSchema,
+        image: artifactSchema,
+        width: z.int().positive(),
+        height: z.int().positive(),
+        transform: z
+          .object({
+            scale: z.number().positive(),
+            translateX: z.number(),
+            translateY: z.number(),
+          })
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();
+export type InkSource = z.infer<typeof inkSourceSchema>;
+
 const revisionSchema = z
   .object({
     number: z.int().positive(),
@@ -25,6 +48,7 @@ const revisionSchema = z
     html: artifactSchema,
     image: artifactSchema,
     assets: z.array(artifactSchema),
+    dependenciesSha256: artifactSchema.shape.sha256.optional(),
     width: z.int().positive(),
     height: z.int().positive(),
     warnings: z.array(layoutWarningSchema),
@@ -48,7 +72,8 @@ const usageSchema = z
   .strict();
 export const runManifestSchema = z
   .object({
-    formatVersion: z.literal(1),
+    formatVersion: z.union([z.literal(1), z.literal(2)]),
+    ink: inkSourceSchema.optional(),
     runId: z.string(),
     status: z.enum(["running", "complete", "partial", "failed"]),
     startedAt: z.iso.datetime({ offset: true }),
@@ -69,6 +94,7 @@ export const runManifestSchema = z
         number: z.int().positive(),
         markdownSha256: artifactSchema.shape.sha256,
         imageSha256: artifactSchema.shape.sha256,
+        dependenciesSha256: artifactSchema.shape.sha256.optional(),
         reviewedAtStep: z.int().nonnegative(),
         eventSeq: z.int().positive(),
       })
@@ -77,6 +103,7 @@ export const runManifestSchema = z
     final: z
       .object({
         revision: z.int().positive(),
+        dependenciesSha256: artifactSchema.shape.sha256.optional(),
         markdown: artifactSchema,
         image: artifactSchema,
         eventSeq: z.int().positive(),
@@ -100,6 +127,33 @@ export const runManifestSchema = z
   .superRefine((manifest, context) => {
     const issue = (message: string) =>
       context.addIssue({ code: "custom", message });
+    if (manifest.formatVersion === 1) {
+      if (
+        manifest.ink !== undefined ||
+        manifest.revisions.some(
+          (revision) => revision.dependenciesSha256 !== undefined,
+        ) ||
+        manifest.reviewedRevision?.dependenciesSha256 !== undefined ||
+        manifest.final?.dependenciesSha256 !== undefined
+      )
+        issue("Version 1 runs cannot contain ink or dependency digests");
+    } else {
+      if (!manifest.ink) issue("Version 2 runs require an ink source");
+      if (
+        manifest.ink &&
+        (manifest.ink.points.path !== "input/points.json" ||
+          manifest.ink.redraw.svg.path !== "input/redraw.svg" ||
+          manifest.ink.redraw.image.path !== "input/redraw.png")
+      )
+        issue("Invalid ink source artifact paths");
+      if (
+        manifest.revisions.some((revision) => !revision.dependenciesSha256) ||
+        (manifest.reviewedRevision &&
+          !manifest.reviewedRevision.dependenciesSha256) ||
+        (manifest.final && !manifest.final.dependenciesSha256)
+      )
+        issue("Version 2 revisions require dependency digests");
+    }
     if (
       manifest.status !== "running" &&
       (!manifest.finishedAt || !manifest.stopReason)
@@ -122,10 +176,20 @@ export const runManifestSchema = z
         issue("Revision artifact paths do not match its number");
       if (
         revision.assets.some(
-          (asset) => !asset.path.startsWith("assets/figures/"),
+          (asset) =>
+            !asset.path.startsWith("assets/figures/") &&
+            !(
+              manifest.formatVersion === 2 &&
+              ([
+                "input/points.json",
+                "input/redraw.svg",
+                "input/redraw.png",
+              ].includes(asset.path) ||
+                /^assets\/ink\/[a-f0-9]{64}\.(json|svg)$/.test(asset.path))
+            ),
         )
       )
-        issue("Revision assets must be captured figures");
+        issue("Revision assets must be authorized run resources");
     }
     const revision = revisions.at(-1);
     const review = manifest.reviewedRevision;
@@ -135,6 +199,7 @@ export const runManifestSchema = z
         review.number !== revision.number ||
         review.markdownSha256 !== revision.markdown.sha256 ||
         review.imageSha256 !== revision.image.sha256 ||
+        review.dependenciesSha256 !== revision.dependenciesSha256 ||
         review.reviewedAtStep <= revision.renderedAtStep)
     )
       issue("Review does not match the current revision");
@@ -148,6 +213,7 @@ export const runManifestSchema = z
         !review ||
         revision.warnings.some((warning) => warning.blocking) ||
         manifest.final.revision !== revision.number ||
+        manifest.final.dependenciesSha256 !== revision.dependenciesSha256 ||
         manifest.final.markdown.path !== "output/note.md" ||
         manifest.final.image.path !== "output/note.png" ||
         manifest.final.markdown.sha256 !== revision.markdown.sha256 ||

@@ -28,6 +28,7 @@ type RevisionEvent = {
   revision: number;
   markdownSha256: string;
   imageSha256: string;
+  dependenciesSha256?: string;
 } & (
   | { type: "document.revision.committed"; audit: RevisionAudit }
   | { type: "render.reviewed" | "note.finalized"; step: number }
@@ -124,11 +125,18 @@ export class SessionRecorder {
     return this.append(type, this.sanitize(data));
   }
 
+  recordInkRunCreated(inkMetadataSha256: string): SessionEvent {
+    return this.append("run.created", { formatVersion: 2, inkMetadataSha256 });
+  }
+
   recordRevision(event: RevisionEvent): SessionEvent {
     return this.append(event.type, {
       revision: event.revision,
       markdownSha256: event.markdownSha256,
       imageSha256: event.imageSha256,
+      ...(event.dependenciesSha256
+        ? { dependenciesSha256: event.dependenciesSha256 }
+        : {}),
       ...(event.type === "document.revision.committed"
         ? { audit: this.sanitize(event.audit) }
         : { step: event.step }),

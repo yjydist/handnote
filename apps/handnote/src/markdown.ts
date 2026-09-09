@@ -5,9 +5,11 @@ import {
   compileNoteMarkdown as compile,
   type ImageResource,
   ImageResourceError,
+  MarkdownValidationError,
 } from "@handnote/renderer";
 import { HandnoteError } from "./errors.ts";
-import type { Artifact } from "./manifest.ts";
+import { inkDependencies, loadInkAsset, readInkSource } from "./ink-assets.ts";
+import type { Artifact, RunManifest } from "./manifest.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { sha256 } from "./utils.ts";
 
@@ -42,7 +44,13 @@ async function readFigureResource(
     });
     const data = await readFile(actual);
     const assetPath = relative(root, actual).split(sep).join("/");
-    assets.set(assetPath, { path: assetPath, sha256: sha256(data) });
+    const hash = sha256(data);
+    if (assets.has(assetPath) && assets.get(assetPath)?.sha256 !== hash)
+      throw new HandnoteError(
+        `Conflicting resource bytes: ${assetPath}`,
+        "filesystem",
+      );
+    assets.set(assetPath, { path: assetPath, sha256: hash });
     return { bytes: data, mimeType: "image/png" };
   } catch (error) {
     if (error instanceof HandnoteError)
@@ -58,15 +66,64 @@ async function readFigureResource(
 
 export async function compileNoteMarkdown(
   markdown: string,
-  options: { runDirectory: string },
+  options: { runDirectory: string; manifest?: RunManifest },
 ): Promise<CompiledNote & { assets: Artifact[] }> {
   const assets = new Map<string, Artifact>();
+  const inkRun =
+    options.manifest?.formatVersion === 2
+      ? { directory: options.runDirectory, manifest: options.manifest }
+      : undefined;
+  const usedStrokes = new Set<number>();
+  const dependencies: Artifact[] = [];
+  if (inkRun) {
+    const source = await readInkSource(inkRun);
+    dependencies.push(
+      source.metadata.points,
+      source.metadata.redraw.svg,
+      source.metadata.redraw.image,
+    );
+  }
+  let inkCount = 0;
   const note = await compile(markdown, {
-    resolveImage: (src) =>
-      readFigureResource(src, options.runDirectory, assets),
+    resolveImage: async (src) => {
+      const match = /^\.\.\/assets\/ink\/([a-f0-9]{64})\.svg$/.exec(src);
+      if (match?.[1] && inkRun) {
+        const loaded = await loadInkAsset(inkRun, match[1]);
+        for (const index of loaded.asset.strokeIndices) {
+          if (usedStrokes.has(index))
+            throw new MarkdownValidationError([
+              {
+                code: "ink_source_overlap",
+                message: "Top-level ink assets repeat a complete source stroke",
+              },
+            ]);
+          usedStrokes.add(index);
+        }
+        inkCount++;
+        dependencies.push(...loaded.artifacts);
+        return {
+          bytes: Buffer.from(loaded.svg),
+          mimeType: "image/svg+xml",
+          ink: {
+            id: loaded.asset.id,
+            width: loaded.asset.width,
+            height: loaded.asset.height,
+            referenceHeight: loaded.asset.presentation.referenceHeight,
+            kind: loaded.asset.presentation.kind,
+          },
+        };
+      }
+      return readFigureResource(src, options.runDirectory, assets);
+    },
   });
+  if (inkRun && inkCount === 0)
+    note.warnings.push({
+      code: "ink_missing",
+      message: "An ink note must include at least one source ink asset",
+      blocking: true,
+    });
   return {
     ...note,
-    assets: [...assets.values()].sort((a, b) => a.path.localeCompare(b.path)),
+    assets: inkDependencies([...assets.values(), ...dependencies]),
   };
 }

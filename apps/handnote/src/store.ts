@@ -16,8 +16,15 @@ import {
   accountModelStep,
   createModelAccounting,
 } from "@handnote/agent";
+import { type InkAsset, inkAssetJson } from "@handnote/ink";
 import { revisionDraftSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
+import {
+  dependenciesSha256,
+  persistInkAsset,
+  prepareInkSource,
+  readInkSource,
+} from "./ink-assets.ts";
 import {
   type Artifact,
   type RunManifest,
@@ -69,6 +76,7 @@ export class RunStore {
     directory: string,
     options: {
       inputExtension: string;
+      inkSourceBytes?: Uint8Array;
       startedAt?: string;
       runId?: string;
     } & RedactionOptions,
@@ -80,9 +88,16 @@ export class RunStore {
     const recorder = SessionRecorder.create(resolve(directory), options);
     const store = new RunStore(directory, recorder);
     const startedAt = options.startedAt ?? isoWithOffset();
-    recorder.record("run.created", { formatVersion: 1 });
+    const ink =
+      options.inkSourceBytes === undefined
+        ? undefined
+        : await prepareInkSource(store.directory, options.inkSourceBytes);
+    const formatVersion = ink ? 2 : 1;
+    if (ink) recorder.recordInkRunCreated(sha256(inkAssetJson(ink)));
+    else recorder.record("run.created", { formatVersion });
     await store.persist({
-      formatVersion: 1,
+      formatVersion,
+      ...(ink ? { ink } : {}),
       runId: options.runId ?? basename(directory),
       status: "running",
       startedAt,
@@ -129,7 +144,7 @@ export class RunStore {
       );
     } catch (error) {
       throw new HandnoteError(
-        "Cannot read a valid version 1 run manifest",
+        "Cannot read a valid version 1 or 2 run manifest",
         "filesystem",
         false,
         { cause: error },
@@ -240,7 +255,13 @@ export class RunStore {
     try {
       const note = await compileNoteMarkdown(text, {
         runDirectory: this.directory,
+        manifest: this.manifest,
       });
+      if (
+        this.manifest.formatVersion === 2 &&
+        dependenciesSha256(note.assets) !== revision.dependenciesSha256
+      )
+        throw new Error("Revision dependency digest mismatch");
       const assets = new Map(
         revision.assets.map((asset) => [asset.path, asset.sha256]),
       );
@@ -268,12 +289,24 @@ export class RunStore {
     const creation = events[0];
     if (
       creation?.type !== "run.created" ||
-      (creation.data as { formatVersion?: number } | null)?.formatVersion !== 1
+      (creation.data as { formatVersion?: number } | null)?.formatVersion !==
+        manifest.formatVersion
     )
       throw new HandnoteError(
         "Run session is missing its creation event",
         "filesystem",
       );
+    if (
+      manifest.formatVersion === 2 &&
+      (creation.data as { inkMetadataSha256?: string }).inkMetadataSha256 !==
+        sha256(inkAssetJson(manifest.ink))
+    )
+      throw new HandnoteError(
+        "Ink source creation event mismatch",
+        "filesystem",
+      );
+    if (manifest.formatVersion === 2)
+      await readInkSource({ directory: this.directory, manifest });
     if (manifest.input.sha256)
       await this.bytes({
         path: manifest.input.path,
@@ -286,6 +319,7 @@ export class RunStore {
             revision?: number;
             markdownSha256?: string;
             imageSha256?: string;
+            dependenciesSha256?: string;
             step?: number;
           }
         | undefined;
@@ -302,7 +336,8 @@ export class RunStore {
       );
       if (
         event.markdownSha256 !== revision.markdown.sha256 ||
-        event.imageSha256 !== revision.image.sha256
+        event.imageSha256 !== revision.image.sha256 ||
+        event.dependenciesSha256 !== revision.dependenciesSha256
       )
         throw new HandnoteError("Revision event hash mismatch", "filesystem");
     }
@@ -312,6 +347,7 @@ export class RunStore {
       if (
         event.markdownSha256 !== review.markdownSha256 ||
         event.imageSha256 !== review.imageSha256 ||
+        event.dependenciesSha256 !== review.dependenciesSha256 ||
         event.step !== review.reviewedAtStep
       )
         throw new HandnoteError("Review event mismatch", "filesystem");
@@ -322,12 +358,17 @@ export class RunStore {
       if (
         event.markdownSha256 !== final.markdown.sha256 ||
         event.imageSha256 !== final.image.sha256 ||
+        event.dependenciesSha256 !== final.dependenciesSha256 ||
         (event.step ?? 0) <= (manifest.reviewedRevision?.reviewedAtStep ?? 0)
       )
         throw new HandnoteError("Finalize event mismatch", "filesystem");
       await this.bytes(final.markdown);
       await this.bytes(final.image);
     }
+  }
+
+  async saveInkAsset(asset: InkAsset) {
+    return this.transaction(() => persistInkAsset(this, asset));
   }
 
   async copyInput(source: string): Promise<void> {
@@ -368,6 +409,7 @@ export class RunStore {
       const parsed = revisionDraftSchema.parse(draft);
       const note = await compileNoteMarkdown(parsed.markdown, {
         runDirectory: this.directory,
+        manifest: this.manifest,
       });
       const number = manifest.revisions.length + 1;
       const parent = "intermediate/revisions";
@@ -398,6 +440,10 @@ export class RunStore {
           html = await artifact("note.html"),
           image = await artifact("note.png");
         for (const asset of note.assets) await this.bytes(asset);
+        const dependencies =
+          manifest.formatVersion === 2
+            ? { dependenciesSha256: dependenciesSha256(note.assets) }
+            : {};
         await rename(this.path(temporary), this.path(directory));
         promoted = true;
         const event = this.recorder.recordRevision({
@@ -405,6 +451,7 @@ export class RunStore {
           revision: number,
           markdownSha256: markdown.sha256,
           imageSha256: image.sha256,
+          ...dependencies,
           audit: parsed.audit,
         });
         const revision: StoredRevision = {
@@ -413,6 +460,7 @@ export class RunStore {
           html,
           image,
           assets: note.assets,
+          ...dependencies,
           width: render.width,
           height: render.height,
           warnings: render.warnings,
@@ -465,12 +513,18 @@ export class RunStore {
         revision: revision.number,
         markdownSha256: revision.markdown.sha256,
         imageSha256: revision.image.sha256,
+        ...(revision.dependenciesSha256
+          ? { dependenciesSha256: revision.dependenciesSha256 }
+          : {}),
         step,
       });
       manifest.reviewedRevision = {
         number: revision.number,
         markdownSha256: revision.markdown.sha256,
         imageSha256: revision.image.sha256,
+        ...(revision.dependenciesSha256
+          ? { dependenciesSha256: revision.dependenciesSha256 }
+          : {}),
         reviewedAtStep: step,
         eventSeq: event.seq,
       };
@@ -543,10 +597,16 @@ export class RunStore {
           revision: revision.number,
           markdownSha256: review.markdownSha256,
           imageSha256: review.imageSha256,
+          ...(review.dependenciesSha256
+            ? { dependenciesSha256: review.dependenciesSha256 }
+            : {}),
           step,
         });
         manifest.final = {
           revision: revision.number,
+          ...(review.dependenciesSha256
+            ? { dependenciesSha256: review.dependenciesSha256 }
+            : {}),
           markdown: { path: "output/note.md", sha256: review.markdownSha256 },
           image: { path: "output/note.png", sha256: review.imageSha256 },
           eventSeq: event.seq,
