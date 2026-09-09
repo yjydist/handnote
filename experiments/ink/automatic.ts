@@ -142,7 +142,11 @@ export async function renderAutomatic(
         ...candidate,
         lineId: String(candidate.lineId),
       })),
-      sourceLines,
+      associated.lines.map((line) => ({
+        lineId: String(line.lineId),
+        text: line.text,
+        bounds: line.bounds,
+      })),
     );
     const replacements: InkReplacement[] = [];
     for (const match of binding.bindings) {

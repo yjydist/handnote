@@ -21,18 +21,26 @@ function source(id: number, text: string, lineText = text): MatchingSource {
   };
 }
 
-test("matches exact excerpts after paragraph movement and leaves added text in font", async () => {
-  const document = await prepareDocument("乙段\n\n甲段新增");
+function lines(...texts: string[]) {
+  return texts.map((text, index) => ({
+    lineId: `line-${index + 1}`,
+    text,
+    bounds: { x: 0, y: index * 30, width: 200, height: 20 },
+  }));
+}
+
+test("matches complete sentences after paragraph movement and leaves added sentences in font", async () => {
+  const document = await prepareDocument("乙段。\n\n甲段。新增。");
   const report = matchInkSources(
     document,
     "source",
-    [source(1, "甲段"), source(2, "乙段")],
-    ["甲段", "乙段"],
+    [source(1, "甲段", "甲段。"), source(2, "乙段", "乙段。")],
+    lines("甲段。", "乙段。"),
   );
   expect(report.bindings.map((b) => b.text).sort()).toEqual(
     ["乙段", "甲段"].sort(),
   );
-  expect(report.fontRanges.map((r) => r.text)).toEqual(["新增"]);
+  expect(report.fontRanges.map((r) => r.text)).toEqual(["。", "。新增。"]);
 });
 
 test("uses unique occurrence context for repeated words without relying on document order", async () => {
@@ -41,7 +49,7 @@ test("uses unique occurrence context for repeated words without relying on docum
     document,
     "source",
     [source(1, "天气", "冬天的天气"), source(2, "天气", "夏天的天气")],
-    ["冬天的天气", "夏天的天气"],
+    lines("冬天的天气", "夏天的天气"),
   );
   expect(report.bindings).toHaveLength(2);
   expect(
@@ -55,7 +63,7 @@ test("does not borrow one reliable instance when another identical occurrence la
     document,
     "source",
     [source(1, "天气")],
-    ["天气", "天气"],
+    lines("天气", "天气"),
   );
   expect(report.bindings).toEqual([]);
   expect(report.unusedSources[0]?.reason).toBe("ambiguous-occurrence");
@@ -67,7 +75,7 @@ test("rejects semantic rewrites and complete fragments spanning format boundarie
     document,
     "source",
     [source(1, "可以得到"), source(2, "天气晴朗")],
-    ["可以得到", "天气晴朗"],
+    lines("可以得到", "天气晴朗"),
   );
   expect(report.bindings).toEqual([]);
   expect(report.unusedSources.map((r) => r.reason)).toEqual([
@@ -84,10 +92,11 @@ test("conflicting source strokes fall back independently of candidate order", as
   ];
   for (const values of [sources, [...sources].reverse()])
     expect(
-      matchInkSources(document, "source", values, ["甲段", "乙段"]).bindings,
+      matchInkSources(document, "source", values, lines("甲段", "乙段"))
+        .bindings,
     ).toEqual([]);
   expect(() =>
-    matchInkSources(document, "changed", sources, ["甲段", "乙段"]),
+    matchInkSources(document, "changed", sources, lines("甲段", "乙段")),
   ).toThrow("stale");
 });
 
@@ -101,7 +110,7 @@ test("does not borrow unique fragments from unrelated source sentences for added
       document,
       "source",
       [source(1, text, line)],
-      [line],
+      lines(line),
     );
     expect(report.bindings).toEqual([]);
     expect(report.unusedSources[0]?.reason).toBe("no-exact-context");
@@ -121,8 +130,74 @@ test("does not invent continuous source context across excluded inline content o
       document,
       "source",
       [source(1, "甲", "甲乙")],
-      ["甲乙"],
+      lines("甲乙"),
     );
     expect(report.bindings).toEqual([]);
   }
+});
+
+test("does not bind standalone source lines into longer rewritten targets", async () => {
+  for (const [original, target] of [
+    ["聚落", "聚落类型"],
+    ["甲段", "甲段新增"],
+  ] as const) {
+    const document = await prepareDocument(target);
+    const report = matchInkSources(
+      document,
+      "source",
+      [source(1, original)],
+      lines(original),
+    );
+    expect(report.bindings).toEqual([]);
+    expect(report.unusedSources[0]?.reason).toBe("no-exact-context");
+  }
+});
+
+test("retains sentence punctuation and formatting boundaries in passage evidence", async () => {
+  const document = await prepareDocument("新增。\n\n他说：“天气**晴朗**。”");
+  const original = "他说：“天气晴朗。”";
+  const report = matchInkSources(
+    document,
+    "source",
+    [source(1, "天气", original)],
+    lines(original),
+  );
+  expect(report.bindings.map((binding) => binding.text)).toEqual(["天气"]);
+  expect(report.alignments[0]).toMatchObject({
+    sourceLineId: "line-1",
+    text: original,
+    sourceStart: 0,
+    sourceEnd: original.length,
+  });
+  const changed = await prepareDocument("他说天气晴朗");
+  expect(
+    matchInkSources(
+      changed,
+      "source",
+      [source(1, "天气", original)],
+      lines(original),
+    ).bindings,
+  ).toEqual([]);
+});
+
+test("validates source line identity and positions and counts unusable repeated source lines", async () => {
+  const document = await prepareDocument("天气");
+  const record = source(1, "天气");
+  const line = lines("天气")[0];
+  if (!line) throw new Error("Missing line");
+  expect(() =>
+    matchInkSources(document, "source", [record], [line, line]),
+  ).toThrow("identity");
+  expect(() =>
+    matchInkSources(
+      document,
+      "source",
+      [{ ...record, lineId: "missing" }],
+      lines("天气"),
+    ),
+  ).toThrow("stale");
+  expect(
+    matchInkSources(document, "source", [record], lines("天气", "天气"))
+      .bindings,
+  ).toEqual([]);
 });
