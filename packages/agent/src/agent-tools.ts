@@ -22,6 +22,19 @@ import {
   selectInkInputSchema,
 } from "./ink-protocol.ts";
 
+function isRuntimeValidationError(
+  output: unknown,
+): output is { error: true; message: string } {
+  return (
+    typeof output === "object" &&
+    output !== null &&
+    "error" in output &&
+    output.error === true &&
+    "message" in output &&
+    typeof output.message === "string"
+  );
+}
+
 export function createAgentTools(options: {
   handlers: HandnoteToolHandlers;
   maxInspectCalls: number;
@@ -41,8 +54,22 @@ export function createAgentTools(options: {
       return options.onFatal(error);
     }
   };
-  const modelMediaOutput = (purpose: MediaToolName, output: ModelMediaResult) =>
+  const modelMediaOutput = (
+    purpose: MediaToolName,
+    output: ModelMediaResult | { error: true; message: string },
+  ) =>
     execute(async () => {
+      // Mastra can return validation errors before the business handler runs.
+      if (isRuntimeValidationError(output)) {
+        return {
+          type: "text" as const,
+          value:
+            output.message +
+            (purpose.endsWith("_ink")
+              ? "\nUse a smaller batch and valid JSON."
+              : ""),
+        };
+      }
       const media = await options.handlers.prepareModelMedia(purpose, output);
       if (media.kind === "text")
         return { type: "text" as const, value: media.text };

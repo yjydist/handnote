@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
+import { MockLanguageModelV3 } from "ai/test";
 import {
   type HandnoteToolHandlers,
   type ToolExecutionContext,
   toolError,
 } from "../src/agent-protocol.ts";
 import { createAgentTools } from "../src/agent-tools.ts";
+import { runAgent } from "../src/index.ts";
 
 function setup(overrides: Partial<HandnoteToolHandlers>) {
   const unexpected = async (): Promise<never> => {
@@ -222,4 +224,159 @@ test("tool schemas reject out-of-bounds crops and unknown draft fields", async (
   expect(schema.safeParse({ markdown: "A note", audit: {} }).success).toBe(
     true,
   );
+});
+
+test.each([
+  "inspect_source",
+  "capture_figure",
+  "inspect_ink",
+  "select_ink",
+  "compose_ink",
+] as const)(
+  "%s preserves runtime schema errors for the model",
+  async (name) => {
+    const unexpected = async (): Promise<never> => {
+      throw new Error("Invalid input reached a business handler");
+    };
+    let prepared = false;
+    const { tools, state } = setup({
+      ink: {
+        inspect_ink: unexpected,
+        select_ink: unexpected,
+        compose_ink: unexpected,
+      },
+      prepareModelMedia: async () => {
+        prepared = true;
+        return { kind: "text", text: "Tool failed" };
+      },
+    });
+    const tool = tools[name];
+    if (!tool?.execute || !tool.toModelOutput)
+      throw new Error("Missing media tool");
+    const rejected = await tool.execute(
+      {} as Parameters<typeof tool.execute>[0],
+      {} as Parameters<typeof tool.execute>[1],
+    );
+    expect(rejected).toMatchObject({ error: true });
+    const message = (rejected as { message: string }).message;
+    expect(message).toContain(`Tool input validation failed for ${name}`);
+    const output = await tool.toModelOutput(
+      rejected as Parameters<typeof tool.toModelOutput>[0],
+    );
+    expect(output).toMatchObject({ type: "text" });
+    const text = (output as { value: string }).value;
+    expect(text).toContain(message);
+    if (name.endsWith("_ink"))
+      expect(text).toContain("Use a smaller batch and valid JSON");
+    expect(prepared).toBe(false);
+    expect(state.failures).toEqual([]);
+  },
+);
+
+test("an offline model sees the malformed ink call error and retries valid JSON", async () => {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Unexpected business operation");
+  };
+  const selection = {
+    strokeIndices: [0],
+    presentation: { kind: "text" as const, referenceHeight: 10 },
+  };
+  let selections = 0;
+  const handlers: HandnoteToolHandlers = {
+    inspect_source: unexpected,
+    capture_figure: unexpected,
+    read_note: unexpected,
+    write_note: unexpected,
+    revise_note: unexpected,
+    review_render: unexpected,
+    finalize_note: async () => ({
+      ok: true,
+      revision: 1,
+      markdownSha256: "a".repeat(64),
+      summary: "Finalized",
+    }),
+    ink: {
+      inspect_ink: unexpected,
+      compose_ink: unexpected,
+      select_ink: async (input) => {
+        expect(input).toEqual({ selections: [selection] });
+        selections++;
+        return {
+          ok: true,
+          paths: ["memory:ink.png"],
+          mimeType: "image/png",
+          items: [selection],
+          summary: "Selected complete stroke 0",
+          status: "pending-human-review",
+        };
+      },
+    },
+    prepareModelMedia: async (_purpose, output) => ({
+      kind: "text",
+      text: output.summary ?? "Tool failed",
+    }),
+  };
+  let calls = 0;
+  const model = new MockLanguageModelV3({
+    doGenerate: async ({ prompt }) => {
+      calls++;
+      if (calls > 3) throw new Error("Unexpected model continuation");
+      if (calls === 2) {
+        const feedback = JSON.stringify(prompt);
+        expect(feedback).toContain(
+          "Tool input validation failed for select_ink",
+        );
+        expect(feedback).toContain("selections: Invalid input: expected array");
+        expect(feedback).toContain("Use a smaller batch and valid JSON");
+      }
+      if (calls === 3)
+        expect(JSON.stringify(prompt)).toContain("Selected complete stroke 0");
+      return {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: `repair-${calls}`,
+            toolName: calls === 3 ? "finalize_note" : "select_ink",
+            input:
+              calls === 1
+                ? '{"selections":[{"strokeIndices":[0],"presentation":{"kind":"text","referenceHeight":10'
+                : calls === 2
+                  ? JSON.stringify({ selections: [selection] })
+                  : "{}",
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage: {
+          inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 5, text: 5, reasoning: 0 },
+        },
+        warnings: [],
+      };
+    },
+  });
+  const result = await runAgent({
+    config: {
+      model: {
+        provider: "openai-compatible",
+        baseUrl: "https://offline.invalid",
+        apiKey: "offline",
+        name: "offline",
+        timeoutMs: 1000,
+        maxRetries: 0,
+      },
+      promptText: "Use the ink tools.",
+      maxSteps: 4,
+      maxInspectCalls: 1,
+    },
+    handlers,
+    source: { data: Uint8Array.of(1, 2, 3), mimeType: "image/png" },
+    model: model as unknown as NonNullable<
+      Parameters<typeof runAgent>[0]["model"]
+    >,
+    onModelEvent: async () => undefined,
+    onDiagnostic: () => undefined,
+  });
+  expect(result.steps).toBe(3);
+  expect(calls).toBe(3);
+  expect(selections).toBe(1);
 });
