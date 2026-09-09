@@ -1,21 +1,21 @@
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { HandnoteError } from "./errors.ts";
-import type { Artifact } from "./manifest.ts";
 import {
   type CompiledNote,
   compileNoteMarkdown as compile,
   type ImageResource,
   ImageResourceError,
-} from "./markdown-compiler.ts";
+} from "@handnote/renderer";
+import { HandnoteError } from "./errors.ts";
+import type { Artifact } from "./manifest.ts";
 import { checkedRunPath } from "./run-path.ts";
 import { sha256 } from "./utils.ts";
 
-export type { CompiledNote, NoteStructure } from "./markdown-compiler.ts";
+export type { CompiledNote, NoteStructure } from "@handnote/renderer";
 export {
   MarkdownValidationError,
   maxMarkdownLength,
-} from "./markdown-compiler.ts";
+} from "@handnote/renderer";
 
 async function readFigureResource(
   src: string,

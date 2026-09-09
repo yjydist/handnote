@@ -2,9 +2,9 @@ name: Offline checks
 
 on:
   pull_request:
-    branches: [dev]
+    branches: [dev, v1.3.0]
   push:
-    branches: [dev]
+    branches: [dev, v1.3.0]
 
 permissions:
   contents: read

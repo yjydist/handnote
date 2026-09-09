@@ -15,5 +15,10 @@
     "resolvePackageJsonExports": false,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "packages/renderer/**/*.ts"
+  ]
 }

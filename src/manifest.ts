@@ -1,5 +1,5 @@
+import { layoutWarningSchema, noteStructureSchema } from "@handnote/renderer";
 import { z } from "zod";
-import { layoutWarningSchema, noteStructureSchema } from "./render-metadata.ts";
 
 const relativePath = z
   .string()

@@ -34,15 +34,15 @@ afterEach(async () => {
 describe("renderer", () => {
   test("loads bundled rendering resources outside the repository cwd", async () => {
     const directory = await temporary();
-    const compiler = new URL("../src/markdown.ts", import.meta.url).pathname;
-    const renderer = new URL("../src/renderer.ts", import.meta.url).pathname;
+    const compiler = import.meta.resolve("@handnote/renderer");
+    const renderer = import.meta.resolve("@handnote/renderer");
     const child = Bun.spawn(
       [
         process.execPath,
         "--eval",
         `import { compileNoteMarkdown } from ${JSON.stringify(compiler)};
        import { renderDocument } from ${JSON.stringify(renderer)};
-       const note = await compileNoteMarkdown("# 中文\\n\\n$x$\\n\\n\`\`\`mermaid\\ngraph TD\\n A --> B\\n\`\`\`", { runDirectory: process.cwd() });
+       const note = await compileNoteMarkdown("# 中文\\n\\n$x$\\n\\n\`\`\`mermaid\\ngraph TD\\n A --> B\\n\`\`\`", {});
        const result = await renderDocument(note, "render", 700);
        console.log(JSON.stringify(result));`,
       ],

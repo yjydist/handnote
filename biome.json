@@ -8,7 +8,10 @@
       "!coverage",
       "!data",
       "!.claude",
-      "!.agents/skills/mastra"
+      "!.agents/skills/mastra",
+      "!**/.venv",
+      "!**/.models",
+      "!**/__pycache__"
     ]
   },
   "formatter": {

@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import {
-  compileNoteMarkdown,
-  ImageResourceError,
-} from "../src/markdown-compiler.ts";
+import { compileNoteMarkdown, ImageResourceError } from "@handnote/renderer";
 
 test("compiles media supplied by a caller without a run directory", async () => {
   const bytes = new Uint8Array([1, 2, 3]);

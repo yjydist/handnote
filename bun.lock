@@ -6,10 +6,28 @@
       "name": "handnote",
       "dependencies": {
         "@ai-sdk/openai-compatible": "3.0.35",
-        "@fontsource-variable/noto-sans-sc": "5.3.0",
+        "@ai-sdk/provider": "4.0.7",
+        "@handnote/renderer": "workspace:*",
         "@mastra/core": "1.61.0",
         "ai": "7.0.77",
         "commander": "15.0.0",
+        "playwright": "1.62.0",
+        "sharp": "0.35.0",
+        "yaml": "2.8.1",
+        "zod": "4.1.12",
+      },
+      "devDependencies": {
+        "@biomejs/biome": "2.2.4",
+        "@types/bun": "1.2.21",
+        "@types/hast": "3.0.5",
+        "typescript": "5.9.2",
+      },
+    },
+    "packages/renderer": {
+      "name": "@handnote/renderer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@fontsource-variable/noto-sans-sc": "5.3.0",
         "katex": "0.16.47",
         "mermaid": "11.12.2",
         "playwright": "1.62.0",
@@ -25,14 +43,7 @@
         "srcset": "5.0.3",
         "unified": "11.0.5",
         "unist-util-visit": "5.0.0",
-        "yaml": "2.8.1",
         "zod": "4.1.12",
-      },
-      "devDependencies": {
-        "@biomejs/biome": "2.2.4",
-        "@types/bun": "1.2.21",
-        "@types/hast": "3.0.5",
-        "typescript": "5.9.2",
       },
     },
   },
@@ -96,6 +107,8 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 
     "@fontsource-variable/noto-sans-sc": ["@fontsource-variable/noto-sans-sc@5.3.0", "", {}, "sha512-lNar1dF7Ik/lHNPo/7JWG0TolXY29LtsqYgMvEysooZ5bsO9uH4shJmRrwyJ3PjyTPljhpMJEK0jDuLSU4vJ1w=="],
+
+    "@handnote/renderer": ["@handnote/renderer@workspace:packages/renderer"],
 
     "@iconify/types": ["@iconify/types@2.0.0", "", {}, "sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg=="],
 
