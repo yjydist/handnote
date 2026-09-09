@@ -10,7 +10,8 @@
     "check": "biome check .",
     "eval:real": "bun run scripts/real-eval.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "eval:ink:prepare": "bun experiments/ink/prepare.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.35",
