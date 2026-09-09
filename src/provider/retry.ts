@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import { safeErrorMetadata } from "../errors.ts";
-import type { SessionRecorder } from "../session.ts";
+import { safeErrorMetadata } from "../agent-errors.ts";
 import type { RunState } from "../state.ts";
-import type { RunStore } from "../store.ts";
 import { classifyProviderError } from "./classify.ts";
 import { isRetryableStatus, record, retryAfter } from "./primitives.ts";
 import type { RetryConfig } from "./types.ts";
@@ -39,7 +37,6 @@ export function requestFingerprint(body: BodyInit | null | undefined):
 
 export function createRetryingFetch(
   config: RetryConfig,
-  recorder: SessionRecorder,
   state: RunState,
   underlyingFetch: typeof fetch = fetch,
   repairResponse: (
@@ -47,57 +44,61 @@ export function createRetryingFetch(
     step: number,
     attempt: number,
   ) => Promise<Response> = async (response) => response,
-  store?: RunStore,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   const transport = async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
+    if (state.hasFatalError) throw state.fatalError;
     const step = state.beginModelStep();
     const request = requestFingerprint(init?.body);
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
-      state.beginModelAttempt({ step, attempt: attempt + 1 });
+    for (let attempt = 1; attempt <= config.maxRetries + 1; attempt++) {
+      state.beginModelAttempt({ step, attempt });
       const started = performance.now();
-      recorder.record("model.attempt.started", {
-        step,
-        attempt: attempt + 1,
-        ...(request ? { request } : {}),
+      await state.emit({
+        type: "model.attempt.started",
+        data: { step, attempt, ...(request ? { request } : {}) },
       });
-      await store?.updateModel(state.modelAccounting);
       const timeout = AbortSignal.timeout(config.timeoutMs);
       const signal = init?.signal
         ? AbortSignal.any([init.signal, timeout])
         : timeout;
+      let response: Response;
       try {
-        const response = await underlyingFetch(input, { ...init, signal });
-        recorder.record("model.attempt.completed", {
+        response = await underlyingFetch(input, { ...init, signal });
+      } catch (error) {
+        await state.emit({
+          type: "model.attempt.failed",
+          data: {
+            step,
+            attempt,
+            durationMs: Math.round(performance.now() - started),
+            error: safeErrorMetadata(error),
+          },
+        });
+        if (attempt > config.maxRetries) throw classifyProviderError(error);
+        await Bun.sleep(Math.min(250 * 2 ** (attempt - 1), 2_000));
+        continue;
+      }
+      await state.emit({
+        type: "model.attempt.completed",
+        data: {
           step,
-          attempt: attempt + 1,
+          attempt,
           status: response.status,
           durationMs: Math.round(performance.now() - started),
-        });
-        if (isRetryableStatus(response.status) && attempt < config.maxRetries) {
-          await Bun.sleep(
-            retryAfter(response.headers.get("retry-after")) ??
-              Math.min(250 * 2 ** attempt, 2_000),
-          );
-          continue;
-        }
-        return await repairResponse(response, step, attempt + 1);
-      } catch (error) {
-        lastError = error;
-        recorder.record("model.attempt.failed", {
-          step,
-          attempt: attempt + 1,
-          durationMs: Math.round(performance.now() - started),
-          error: safeErrorMetadata(error),
-        });
-        if (attempt >= config.maxRetries) throw classifyProviderError(error);
-        await Bun.sleep(Math.min(250 * 2 ** attempt, 2_000));
+        },
+      });
+      if (isRetryableStatus(response.status) && attempt <= config.maxRetries) {
+        await Bun.sleep(
+          retryAfter(response.headers.get("retry-after")) ??
+            Math.min(250 * 2 ** (attempt - 1), 2_000),
+        );
+        continue;
       }
+      return await repairResponse(response, step, attempt);
     }
-    throw classifyProviderError(lastError);
+    throw new Error("Model attempt budget was exhausted");
   };
   return transport;
 }

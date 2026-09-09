@@ -3,19 +3,11 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import { HandnoteError } from "./errors.ts";
+import { modelConfigSchema } from "./provider/types.ts";
 
 const rawConfigSchema = z
   .object({
-    model: z
-      .object({
-        provider: z.enum(["openai-compatible"]).default("openai-compatible"),
-        baseUrl: z.url(),
-        apiKey: z.string().min(1),
-        name: z.string().min(1),
-        timeoutMs: z.int().min(1_000).max(600_000).default(240_000),
-        maxRetries: z.int().min(0).max(5).default(1),
-      })
-      .strict(),
+    model: modelConfigSchema,
     prompt: z.object({ file: z.string().min(1) }).strict(),
     maxSteps: z.int().min(2).max(50).default(18),
     maxInspectCalls: z.int().min(1).max(8).default(3),

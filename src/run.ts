@@ -1,18 +1,18 @@
 import { constants } from "node:fs";
-import { access, readdir, rm } from "node:fs/promises";
+import { access, readdir, readFile, rm } from "node:fs/promises";
 import { basename, extname, relative, resolve } from "node:path";
 import sharp from "sharp";
 import { runAgent } from "./agent.ts";
+import { AgentError } from "./agent-errors.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
 import type { RunResult } from "./manifest.ts";
-import { createModel } from "./provider/index.ts";
+import { createModelAccounting } from "./model-accounting.ts";
 import { checkedRunPath } from "./run-path.ts";
 import type { SessionRecorder } from "./session.ts";
-import { RunState } from "./state.ts";
 import { RunStore } from "./store.ts";
-import { createHandnoteTools } from "./tools/index.ts";
+import { createHandnoteHandlers } from "./tools/index.ts";
 import {
   createUniqueDirectory,
   isoWithOffset,
@@ -122,7 +122,7 @@ export async function executeRun(
     );
   }
   const recorder = store.recorder;
-  const state = new RunState();
+  let modelAccounting = createModelAccounting();
   let stopReason = "internal_error";
   let terminalError: HandnoteError | undefined;
   try {
@@ -134,26 +134,43 @@ export async function executeRun(
     try {
       await store.copyInput(input.path);
       const sourcePath = store.path(store.manifest.input.path);
-      const tools = createHandnoteTools({
+      const handlers = createHandnoteHandlers({
         store,
         sourcePath,
         width: config.width,
         maxSteps: config.maxSteps,
         maxInspectCalls: config.maxInspectCalls,
         toolMedia: config.toolMedia,
-        state,
         recorder,
       });
-      const model = createModel({ config, recorder, state, store });
       const result = await runAgent({
         config,
-        model,
-        tools,
-        sourcePath,
-        sourceMimeType: input.mimeType,
-        recorder,
-        state,
-        store,
+        handlers,
+        source: { data: await readFile(sourcePath), mimeType: input.mimeType },
+        onModelEvent: async (event) => {
+          // Keep known usage even when recording its completed-step event fails.
+          modelAccounting = event.accounting;
+          recorder.record(
+            event.type,
+            event.type === "model.run.started"
+              ? {
+                  ...event.data,
+                  source: await recorder.media(sourcePath, input.mimeType),
+                }
+              : event.data,
+          );
+          if (
+            event.type === "model.attempt.started" ||
+            event.type === "model.step.completed"
+          )
+            await store.updateModel(modelAccounting);
+        },
+        onDiagnostic: (diagnostic) => {
+          process.stderr.write(
+            `${JSON.stringify(recorder.sanitize(diagnostic))}\n`,
+          );
+          return undefined;
+        },
       });
       const hasRevision = Boolean(store.manifest.currentRevision);
       stopReason =
@@ -168,9 +185,13 @@ export async function executeRun(
       terminalError =
         error instanceof HandnoteError
           ? error
-          : new HandnoteError(asError(error).message, "internal", false, {
-              cause: error,
-            });
+          : error instanceof AgentError
+            ? new HandnoteError(error.message, error.kind, error.recoverable, {
+                cause: error.cause ?? error,
+              })
+            : new HandnoteError(asError(error).message, "internal", false, {
+                cause: error,
+              });
       stopReason = terminalError.kind;
       recorder.record("run.error", {
         kind: terminalError.kind,
@@ -185,7 +206,7 @@ export async function executeRun(
         recorder.record("cleanup.failed", { error: safeErrorMetadata(error) });
       }
     }
-    await store.updateModel(state.modelAccounting);
+    await store.updateModel(modelAccounting);
     const manifest = await store.finish(
       stopReason,
       terminalError

@@ -1,7 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { JSONObject, LanguageModelV4Usage } from "@ai-sdk/provider";
-import { HandnoteError } from "../errors.ts";
-import type { SessionRecorder } from "../session.ts";
+import { AgentError } from "../agent-errors.ts";
+import type { RunState } from "../state.ts";
 import { finiteNumber, record } from "./primitives.ts";
 import { createRetryingFetch } from "./retry.ts";
 import type { ProviderAdapter } from "./types.ts";
@@ -59,7 +59,7 @@ export function repairOpenAiToolArguments(payload: unknown): {
 }
 
 export function repairToolArgumentResponse(
-  recorder: SessionRecorder,
+  state: RunState,
 ): (response: Response, step: number, attempt: number) => Promise<Response> {
   return async (response, step, attempt) => {
     if (
@@ -67,27 +67,27 @@ export function repairToolArgumentResponse(
       !response.headers.get("content-type")?.includes("application/json")
     )
       return response;
+    let payload: unknown;
     try {
-      const payload = await response.clone().json();
-      const repaired = repairOpenAiToolArguments(payload);
-      if (repaired.repairs.length === 0) return response;
-      recorder.record("model.tool_arguments.repaired", {
-        step,
-        attempt,
-        repairs: repaired.repairs,
-      });
-      const headers = new Headers(response.headers);
-      headers.delete("content-encoding");
-      headers.delete("content-length");
-      headers.delete("transfer-encoding");
-      return new Response(JSON.stringify(repaired.payload), {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
+      payload = await response.clone().json();
     } catch {
       return response;
     }
+    const repaired = repairOpenAiToolArguments(payload);
+    if (repaired.repairs.length === 0) return response;
+    await state.emit({
+      type: "model.tool_arguments.repaired",
+      data: { step, attempt, repairs: repaired.repairs },
+    });
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    headers.delete("transfer-encoding");
+    return new Response(JSON.stringify(repaired.payload), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   };
 }
 
@@ -165,7 +165,7 @@ function toolOutput(
     parts = JSON.parse(content);
   } catch (error) {
     if (!/"type":"(?:file|media|image-data)"/.test(content)) return undefined;
-    throw new HandnoteError(
+    throw new AgentError(
       "Cannot parse a media-bearing tool result",
       "provider_tool_media_incompatible",
       false,
@@ -188,7 +188,7 @@ function toolOutput(
         item.type === "media" ||
         item.type === "image-data")
     )
-      throw new HandnoteError(
+      throw new AgentError(
         "Tool result contains unsupported or malformed media",
         "provider_tool_media_incompatible",
       );
@@ -275,23 +275,21 @@ export function promoteToolMedia(
 
 export const openAiCompatibleAdapter: ProviderAdapter = {
   protocol: "openai-compatible",
-  createModel({ config, recorder, state, store }) {
+  createModel({ config, state }) {
     const transport = createRetryingFetch(
-      config.model,
-      recorder,
+      config,
       state,
       fetch,
-      repairToolArgumentResponse(recorder),
-      store,
+      repairToolArgumentResponse(state),
     );
     const provider = createOpenAICompatible({
       name: "handnote-provider",
-      baseURL: config.model.baseUrl.replace(/\/$/, ""),
-      apiKey: config.model.apiKey,
+      baseURL: config.baseUrl.replace(/\/$/, ""),
+      apiKey: config.apiKey,
       fetch: transport as unknown as typeof fetch,
       transformRequestBody: promoteToolMedia,
       convertUsage: convertDeepSeekUsage,
     });
-    return provider(config.model.name);
+    return provider(config.name);
   },
 };

@@ -1,7 +1,15 @@
-import type { RunManifest } from "./manifest.ts";
-import { accumulateStepUsage, type StepUsage } from "./usage.ts";
+import {
+  accumulateStepUsage,
+  type StepUsage,
+  type TokenUsage,
+} from "./usage.ts";
 
-export type ModelAccounting = RunManifest["model"];
+export interface ModelAccounting {
+  steps: number;
+  retries: number;
+  attempts: number;
+  usage: TokenUsage;
+}
 
 export function createModelAccounting(): ModelAccounting {
   return { steps: 0, retries: 0, attempts: 0, usage: {} };

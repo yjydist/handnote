@@ -145,7 +145,7 @@ describe("capture_figure tool", () => {
       if (failure.status === "rejected")
         expect(failure.reason).toMatchObject({ kind: "internal" });
     }
-    expect(state.fatalError?.kind).toBe("internal");
+    expect(state.fatalError).toMatchObject({ kind: "internal" });
 
     await sharp({
       create: { width: 20, height: 10, channels: 3, background: "white" },

@@ -1,11 +1,11 @@
+import { readFile } from "node:fs/promises";
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
 import { runAgent } from "../../src/agent.ts";
+import { AgentError } from "../../src/agent-errors.ts";
 import type { HandnoteConfig } from "../../src/config.ts";
-import { HandnoteError } from "../../src/errors.ts";
 import type { createModel } from "../../src/provider/index.ts";
-import { RunState } from "../../src/state.ts";
-import { createHandnoteTools } from "../../src/tools/index.ts";
+import { createHandnoteHandlers } from "../../src/tools/index.ts";
 import { createStoreFixture } from "../helpers.ts";
 
 const directory = process.argv[2];
@@ -17,23 +17,20 @@ await sharp({
 })
   .png()
   .toFile(sourcePath);
-const state = new RunState();
 const store = await createStoreFixture(directory, { secrets: [apiKey] });
 const recorder = store.recorder;
-const tools = createHandnoteTools({
+const handlers = createHandnoteHandlers({
   store,
   sourcePath,
   width: 700,
   maxSteps: 18,
   maxInspectCalls: 3,
   toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-  state,
   recorder,
 });
 const model = new MockLanguageModelV3({
   modelId: "offline-timeout",
   doGenerate: async () => {
-    state.beginModelStep();
     throw new DOMException(`request ${apiKey} timed out`, "TimeoutError");
   },
 });
@@ -62,15 +59,21 @@ try {
   await runAgent({
     config,
     model: model as unknown as ReturnType<typeof createModel>,
-    tools,
-    sourcePath,
-    sourceMimeType: "image/png",
-    recorder,
-    state,
+    handlers,
+    source: { data: await readFile(sourcePath), mimeType: "image/png" },
+    onModelEvent: async (event) => {
+      recorder.record(event.type, event.data);
+    },
+    onDiagnostic: (diagnostic) => {
+      process.stderr.write(
+        `${JSON.stringify(recorder.sanitize(diagnostic))}\n`,
+      );
+      return undefined;
+    },
   });
   throw new Error("Expected model failure");
 } catch (error) {
-  if (!(error instanceof HandnoteError)) throw error;
+  if (!(error instanceof AgentError)) throw error;
   process.stdout.write(
     `${JSON.stringify({ kind: error.kind, message: error.message })}\n`,
   );

@@ -1,6 +1,5 @@
 import type { ModelMediaOptions } from "../image.ts";
 import type { SessionRecorder } from "../session.ts";
-import type { RunState } from "../state.ts";
 
 import type { RunStore } from "../store.ts";
 
@@ -11,6 +10,5 @@ export interface ToolContext {
   maxSteps: number;
   maxInspectCalls: number;
   toolMedia: ModelMediaOptions;
-  state: RunState;
   recorder: SessionRecorder;
 }

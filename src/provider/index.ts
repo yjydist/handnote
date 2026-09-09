@@ -1,4 +1,4 @@
-import { HandnoteError } from "../errors.ts";
+import { AgentError } from "../agent-errors.ts";
 import { openAiCompatibleAdapter } from "./openai-compatible.ts";
 import type { ProviderAdapter, ProviderModelContext } from "./types.ts";
 
@@ -23,10 +23,10 @@ const adapters = new Map<string, ProviderAdapter>([
 ]);
 
 export function createModel(context: ProviderModelContext) {
-  const adapter = adapters.get(context.config.model.provider);
+  const adapter = adapters.get(context.config.provider);
   if (!adapter)
-    throw new HandnoteError(
-      `Unknown provider: ${context.config.model.provider}`,
+    throw new AgentError(
+      `Unknown provider: ${context.config.provider}`,
       "validation",
       false,
     );

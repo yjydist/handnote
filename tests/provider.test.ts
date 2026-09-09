@@ -69,8 +69,9 @@ describe("provider transport", () => {
     const recorder = SessionRecorder.create(directory);
     const retrying = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 0 },
-      recorder,
-      new RunState(),
+      new RunState(async (event) => {
+        recorder.record(event.type, event.data);
+      }),
       (async () =>
         new Response(
           JSON.stringify({
@@ -91,7 +92,11 @@ describe("provider transport", () => {
           }),
           { headers: { "content-type": "application/json" } },
         )) as unknown as typeof fetch,
-      repairToolArgumentResponse(recorder),
+      repairToolArgumentResponse(
+        new RunState(async (event) => {
+          recorder.record(event.type, event.data);
+        }),
+      ),
     );
     const response = await retrying("https://example.test");
     const payload = (await response.json()) as {
@@ -115,11 +120,12 @@ describe("provider transport", () => {
   test("retries 429 and all 5xx responses but does not retry 401", async () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
-    const state = new RunState();
+    const state = new RunState(async (event) => {
+      recorder.record(event.type, event.data);
+    });
     let calls = 0;
     const retrying = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 1 },
-      recorder,
       state,
       (async () => {
         calls++;
@@ -140,7 +146,6 @@ describe("provider transport", () => {
     calls = 0;
     const serverError = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 1 },
-      recorder,
       state,
       (async () => {
         calls++;
@@ -152,7 +157,6 @@ describe("provider transport", () => {
     calls = 0;
     const auth = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 2 },
-      recorder,
       state,
       (async () => {
         calls++;
@@ -172,11 +176,12 @@ describe("provider transport", () => {
   test("gives each timed-out attempt its own deadline", async () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
-    const state = new RunState();
+    const state = new RunState(async (event) => {
+      recorder.record(event.type, event.data);
+    });
     let calls = 0;
     const timingOut = createRetryingFetch(
       { timeoutMs: 10, maxRetries: 1 },
-      recorder,
       state,
       (async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++;
@@ -206,11 +211,12 @@ describe("provider transport", () => {
   test("does not transport-retry a body stream after response start", async () => {
     const directory = await temporary();
     const recorder = SessionRecorder.create(directory);
-    const state = new RunState();
+    const state = new RunState(async (event) => {
+      recorder.record(event.type, event.data);
+    });
     let calls = 0;
     const retrying = createRetryingFetch(
       { timeoutMs: 10, maxRetries: 2 },
-      recorder,
       state,
       (async (_input: RequestInfo | URL, init?: RequestInit) => {
         calls++;

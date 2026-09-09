@@ -1,7 +1,7 @@
 import { MastraLogger } from "@mastra/core/logger";
-import { safeErrorMetadata } from "./errors.ts";
+import { safeErrorMetadata } from "./agent-errors.ts";
+import type { AgentDiagnosticSink } from "./agent-events.ts";
 import { classifyProviderError } from "./provider/index.ts";
-import type { SessionRecorder } from "./session.ts";
 
 function errorDiagnostic(error: unknown): object {
   const classified = classifyProviderError(error);
@@ -32,7 +32,7 @@ function logContext(value: unknown): object {
 }
 
 export class AgentErrorLogger extends MastraLogger {
-  constructor(private readonly recorder: SessionRecorder) {
+  constructor(private readonly onDiagnostic: AgentDiagnosticSink) {
     super();
   }
 
@@ -42,10 +42,9 @@ export class AgentErrorLogger extends MastraLogger {
   warn(): void {}
 
   error(message: string, ...args: unknown[]): void {
-    const diagnostic = this.recorder.sanitize({
+    this.onDiagnostic({
       message,
       context: args.map(logContext),
     });
-    process.stderr.write(`${JSON.stringify(diagnostic)}\n`);
   }
 }

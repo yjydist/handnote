@@ -7,8 +7,7 @@ import sharp from "sharp";
 import { runAgent } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
 import type { createModel } from "../src/provider/index.ts";
-import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
+import { createHandnoteHandlers } from "../src/tools/index.ts";
 import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
 const directories: string[] = [];
@@ -34,17 +33,15 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   })
     .png()
     .toFile(sourcePath);
-  const state = new RunState();
   const store = await createStoreFixture(directory);
   const recorder = store.recorder;
-  const tools = createHandnoteTools({
+  const handlers = createHandnoteHandlers({
     store,
     sourcePath,
     width: 700,
     maxSteps: 18,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-    state,
     recorder,
   });
   const script = [
@@ -55,7 +52,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   let call = 0;
   const generateForCall = async (): Promise<LanguageModelV3GenerateResult> => {
     const current = script[call++];
-    state.beginModelStep();
     if (!current) throw new Error("unexpected extra model call");
     return {
       content: [
@@ -99,11 +95,17 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   const result = await runAgent({
     config,
     model: model as unknown as ReturnType<typeof createModel>,
-    tools,
-    sourcePath,
-    sourceMimeType: "image/png",
-    recorder,
-    state,
+    handlers,
+    source: { data: await readFile(sourcePath), mimeType: "image/png" },
+    onModelEvent: async (event) => {
+      recorder.record(event.type, event.data);
+    },
+    onDiagnostic: (diagnostic) => {
+      process.stderr.write(
+        `${JSON.stringify(recorder.sanitize(diagnostic))}\n`,
+      );
+      return undefined;
+    },
   });
   expect(result.steps).toBe(3);
   expect(result.usage).toEqual({
@@ -115,7 +117,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     textOutputTokens: 15,
   });
   expect(call).toBe(3);
-  expect(state.finalized).toBe(true);
   expect(model.doGenerateCalls[2]?.prompt).toEqual(
     expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
   );

@@ -1,4 +1,4 @@
-import type { HandnoteError } from "./errors.ts";
+import type { ModelEventPayload, ModelEventSink } from "./agent-events.ts";
 import {
   accountModelAttempt,
   accountModelStep,
@@ -7,10 +7,21 @@ import {
 } from "./model-accounting.ts";
 import type { StepUsage } from "./usage.ts";
 
-// Only coordinates the active model loop; document state belongs to RunStore.
 export class RunState {
   #modelAccounting = createModelAccounting();
-  fatalError?: HandnoteError;
+  fatalError: unknown;
+  hasFatalError = false;
+
+  constructor(private readonly onEvent: ModelEventSink = async () => {}) {}
+
+  async emit(event: ModelEventPayload): Promise<void> {
+    try {
+      await this.onEvent({ ...event, accounting: this.modelAccounting });
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
   finalized = false;
 
   get modelStep(): number {
@@ -39,7 +50,9 @@ export class RunState {
     });
   }
 
-  fail(error: HandnoteError): void {
-    this.fatalError ??= error;
+  fail(error: unknown): void {
+    if (this.hasFatalError) return;
+    this.hasFatalError = true;
+    this.fatalError = error;
   }
 }

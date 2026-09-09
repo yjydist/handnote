@@ -1,4 +1,4 @@
-import { HandnoteError } from "../errors.ts";
+import { AgentError } from "../agent-errors.ts";
 import { finiteNumber, isRetryableStatus, record } from "./primitives.ts";
 
 function requestContainsSerializedToolMedia(error: unknown): boolean {
@@ -12,8 +12,8 @@ function requestContainsSerializedToolMedia(error: unknown): boolean {
   });
 }
 
-export function classifyProviderError(error: unknown): HandnoteError {
-  if (error instanceof HandnoteError) return error;
+export function classifyProviderError(error: unknown): AgentError {
+  if (error instanceof AgentError) return error;
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   const name = error instanceof Error ? error.name : undefined;
@@ -22,7 +22,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
   const isRetryable =
     typeof value?.isRetryable === "boolean" ? value.isRetryable : undefined;
   if (name === "TimeoutError")
-    return new HandnoteError(
+    return new AgentError(
       "Provider request timed out",
       "provider_transient",
       true,
@@ -34,7 +34,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
     ((statusCode === undefined || !isRetryableStatus(statusCode)) &&
       /unauthori[sz]ed|forbidden|api.?key/.test(lower))
   )
-    return new HandnoteError(
+    return new AgentError(
       "Provider authentication failed",
       "authentication",
       false,
@@ -46,7 +46,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
     ) &&
     requestContainsSerializedToolMedia(error)
   )
-    return new HandnoteError(
+    return new AgentError(
       "Provider cannot consume media in tool results",
       "provider_tool_media_incompatible",
       false,
@@ -58,7 +58,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
       /tool.*(?:media|image|file)|file-data|file.*content/.test(lower)) &&
     /unsupported|not support|invalid|reject/.test(lower)
   )
-    return new HandnoteError(
+    return new AgentError(
       "Provider does not support media in tool results",
       "provider_tool_media_incompatible",
       false,
@@ -68,7 +68,7 @@ export function classifyProviderError(error: unknown): HandnoteError {
     /image|vision|multimodal/.test(lower) &&
     /unsupported|not support|invalid.*content|reject/.test(lower)
   )
-    return new HandnoteError(
+    return new AgentError(
       "Provider does not support image input",
       "provider_image_incompatible",
       false,
@@ -78,44 +78,41 @@ export function classifyProviderError(error: unknown): HandnoteError {
     /tool|function.?call/.test(lower) &&
     /unsupported|not support|invalid|reject/.test(lower)
   )
-    return new HandnoteError(
+    return new AgentError(
       "Provider does not support tool calling",
       "provider_tools_incompatible",
       false,
       { cause: error },
     );
   if (statusCode !== undefined && isRetryableStatus(statusCode))
-    return new HandnoteError(
+    return new AgentError(
       `Provider request failed temporarily (HTTP ${statusCode})`,
       "provider_transient",
       true,
       { cause: error },
     );
   if (statusCode !== undefined && statusCode >= 400 && statusCode < 500)
-    return new HandnoteError(
+    return new AgentError(
       `Provider rejected the request (HTTP ${statusCode})`,
       "provider_rejected",
       false,
       { cause: error },
     );
   if (isRetryable === true)
-    return new HandnoteError(
+    return new AgentError(
       "Provider request failed temporarily",
       "provider_transient",
       true,
       { cause: error },
     );
   if (/timed?\s*out|timeout/.test(lower))
-    return new HandnoteError(
+    return new AgentError(
       "Provider request timed out",
       "provider_transient",
       true,
       { cause: error },
     );
-  return new HandnoteError(
-    "Provider request failed",
-    "provider_transient",
-    true,
-    { cause: error },
-  );
+  return new AgentError("Provider request failed", "provider_transient", true, {
+    cause: error,
+  });
 }

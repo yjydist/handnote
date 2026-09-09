@@ -2,7 +2,6 @@ import type {
   HandnoteToolHandlers,
   ToolExecutionContext,
 } from "../agent-protocol.ts";
-import { asError, HandnoteError } from "../errors.ts";
 import { createModelPreviews } from "../image.ts";
 
 import type { ToolContext } from "./types.ts";
@@ -30,17 +29,9 @@ export function layoutSummary(
     .join("; ")}`;
 }
 
-export function createToolRuntime(context: ToolContext) {
-  const fatal = (error: unknown): never => {
-    const value =
-      error instanceof HandnoteError
-        ? error
-        : new HandnoteError(asError(error).message, "internal", false, {
-            cause: error,
-          });
-    context.state.fail(value);
-    throw value;
-  };
+export function createMediaHandler(
+  context: ToolContext,
+): HandnoteToolHandlers["prepareModelMedia"] {
   const prepareModelMedia: HandnoteToolHandlers["prepareModelMedia"] = async (
     purpose,
     output,
@@ -69,5 +60,5 @@ export function createToolRuntime(context: ToolContext) {
       })),
     };
   };
-  return { fatal, prepareModelMedia };
+  return prepareModelMedia;
 }
