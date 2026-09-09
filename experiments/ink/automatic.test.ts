@@ -11,10 +11,15 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseInkJson, renderInkSvg } from "@handnote/ink";
+import { associateInk, parseInkJson, renderInkSvg } from "@handnote/ink";
 import sharp from "sharp";
-import { renderAutomatic } from "./automatic.ts";
+import { renderAssociatedPage, renderAutomatic } from "./automatic.ts";
+import { auditCharacterHeights } from "./character-height-audit.ts";
 import development from "./development.json";
+import { reassessExteriorStrokes } from "./exterior-strokes.ts";
+import baselineRaw from "./fixtures/ocr-page-2-baseline.json";
+import { loadOcrEvidence } from "./ocr-evidence.ts";
+import { compareReadability } from "./readability.ts";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const hash = (value: Uint8Array) =>
@@ -84,6 +89,123 @@ test("valid fixed OCR redraw evidence reaches output reservation", async () => {
     await rm(data.directory, { recursive: true, force: true });
   }
 });
+
+for (const mutation of ["frozen-report", "baseline-run"] as const) {
+  test(`readability refuses stale ${mutation} before reserving output`, async () => {
+    const data = await fixture();
+    try {
+      await data.save();
+      const frozen = join(data.directory, "frozen");
+      await mkdir(frozen);
+      const bytes = Buffer.from(
+        JSON.stringify({
+          annotationStatus: "pending-human-review",
+          pages: [],
+          baselineRunHash:
+            mutation === "baseline-run"
+              ? "b".repeat(64)
+              : hash(await readFile(join(data.ocr, "run.json"))),
+        }),
+      );
+      await writeFile(join(frozen, "report.json"), bytes);
+      await writeFile(
+        join(frozen, "verification.json"),
+        JSON.stringify({
+          reportHash:
+            mutation === "frozen-report" ? "c".repeat(64) : hash(bytes),
+        }),
+      );
+      await expect(
+        compareReadability(data.input, data.ocr, frozen, data.output),
+      ).rejects.toThrow(
+        mutation === "frozen-report"
+          ? "Frozen comparison report changed"
+          : "Baseline OCR differs",
+      );
+      await expect(stat(data.output)).rejects.toThrow("ENOENT");
+    } finally {
+      await rm(data.directory, { recursive: true, force: true });
+    }
+  });
+}
+
+test("character-height hypothesis preserves fixed bindings and never repairs unavailable line metrics", async () => {
+  const data = await fixture();
+  try {
+    const record = data.run.pages[0];
+    if (!record) throw new Error("Missing fixed development record");
+    await writeFile(
+      join(data.ocr, record.rawResult),
+      JSON.stringify({ ...baselineRaw, input_path: record.image }),
+    );
+    await data.save();
+    const evidence = await loadOcrEvidence(data.input, data.ocr);
+    const input = evidence.inputs[0];
+    if (!input) throw new Error("Missing validated page");
+    const original = associateInk(input.source, {
+      raw: input.raw,
+      transform: input.record.transform,
+      ocr: {
+        version: "paddleocr-3.3.1",
+        resultHash: hash(input.rawBytes),
+        modelHash: data.run.modelLockHash,
+      },
+    });
+    const association = reassessExteriorStrokes(
+      input.source,
+      original,
+    ).association;
+    const audit = auditCharacterHeights(input.source, association);
+    const references = new Map(
+      audit.lines.flatMap((line) =>
+        line.metrics.status === "available" && line.medianHeight !== null
+          ? [[line.lineId, line.medianHeight] as const]
+          : [],
+      ),
+    );
+    const options = {
+      width: 360,
+      variant: "readability-test",
+      context: "boundary-edits" as const,
+      fragmentLayout: "source-spacing" as const,
+    };
+    const baseline = await renderAssociatedPage(input, association, {
+      ...options,
+      directory: join(data.directory, "baseline"),
+    });
+    const hypothesis = await renderAssociatedPage(input, association, {
+      ...options,
+      directory: join(data.directory, "hypothesis"),
+      characterHeightReferences: references,
+    });
+    const blocked = await renderAssociatedPage(input, original, {
+      ...options,
+      directory: join(data.directory, "blocked"),
+      characterHeightReferences: references,
+    });
+    expect(baseline.inkCharacters).toBe(18);
+    expect(hypothesis.inkCharacters).toBe(18);
+    expect(hypothesis.bindingsHash).toBe(baseline.bindingsHash);
+    expect(hypothesis.sourcesHash).toBe(baseline.sourcesHash);
+    expect(hypothesis.markdownHash).toBe(baseline.markdownHash);
+    expect(
+      hypothesis.renderFragments.flatMap((fragment) => fragment.strokeIndices),
+    ).toEqual(Array.from({ length: 85 }, (_, i) => i + 211));
+    expect(hypothesis.replacements[0]?.bounds?.width).toBeGreaterThan(
+      baseline.replacements[0]?.bounds?.width ?? Infinity,
+    );
+    const baselineLayout = baseline.replacements[0]?.resolvedLayout;
+    const hypothesisLayout = hypothesis.replacements[0]?.resolvedLayout;
+    if (!baselineLayout || !hypothesisLayout)
+      throw new Error("Missing shared line typography");
+    expect(hypothesisLayout.fontSize).toBe(baselineLayout.fontSize);
+    expect(hypothesis.warnings).toEqual([]);
+    expect(blocked.inkCharacters).toBe(0);
+    expect(blocked.metricFallbacks.length).toBeGreaterThan(0);
+  } finally {
+    await rm(data.directory, { recursive: true, force: true });
+  }
+}, 30_000);
 
 for (const mutation of [
   "transform",

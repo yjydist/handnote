@@ -219,3 +219,162 @@ test("validates source line identity and positions and counts unusable repeated 
       .bindings,
   ).toEqual([]);
 });
+
+test("boundary edits are opt-in and retain real offsets after a circled marker and added punctuation", async () => {
+  for (const marker of ["①", "④"]) {
+    const original = `${marker} 结尾方式：悲剧式、喜剧式`;
+    const text = "悲剧式、喜剧式";
+    const document = await prepareDocument("结尾方式：悲剧式、喜剧式。");
+    const records = [source(1, text, original)];
+    const sourceLines = lines(original);
+    const exact = matchInkSources(document, "source", records, sourceLines);
+    expect(exact.bindings).toEqual([]);
+    expect(
+      matchInkSources(document, "source", records, sourceLines, {
+        context: "exact",
+      }),
+    ).toEqual(exact);
+    const report = matchInkSources(document, "source", records, sourceLines, {
+      context: "boundary-edits",
+    });
+    expect(report.bindings.map((binding) => binding.text)).toEqual([text]);
+    expect(report.alignments).toEqual([
+      {
+        sourceLineId: "line-1",
+        sourceStart: 2,
+        sourceEnd: original.length,
+        targetFlowId: document.textRanges[0]?.flowId ?? "missing",
+        targetStart: 0,
+        targetEnd: original.length - 2,
+        text: original.slice(2),
+      },
+    ]);
+    expect(report.fontRanges.map((range) => range.text)).toEqual([
+      "结尾方式：",
+      "。",
+    ]);
+    const binding = report.bindings[0];
+    const targetRange = document.textRanges.find(
+      (range) => range.rangeId === binding?.target.rangeId,
+    );
+    expect(
+      targetRange?.text.slice(binding?.target.start, binding?.target.end),
+    ).toBe(text);
+  }
+});
+
+test("boundary edits leave changed markers and terminal punctuation in font without cutting source fragments", async () => {
+  const document = await prepareDocument("① 天气！");
+  const original = "④ 天气。";
+  const records = [
+    source(1, "天气", original),
+    { ...source(2, "④", original), lineId: "line-1" },
+    { ...source(3, "。", original), lineId: "line-1" },
+  ];
+  const report = matchInkSources(document, "source", records, lines(original), {
+    context: "boundary-edits",
+  });
+  expect(report.bindings.map((binding) => binding.text)).toEqual(["天气"]);
+  expect(report.fontRanges.map((range) => range.text)).toEqual(["① ", "！"]);
+  expect(report.unusedSources.map((item) => item.sourceId)).toEqual([
+    "source-2",
+    "source-3",
+  ]);
+  expect(
+    matchInkSources(
+      document,
+      "source",
+      [source(1, original)],
+      lines(original),
+      { context: "boundary-edits" },
+    ).bindings,
+  ).toEqual([]);
+});
+
+test("boundary edits count duplicate bodies from unavailable source lines and repeated target bodies", async () => {
+  for (const sourceTexts of [
+    ["①天气", "④天气"],
+    ["①天气", "天气。"],
+  ]) {
+    const document = await prepareDocument("天气。");
+    const original = sourceTexts[0];
+    if (!original) throw new Error("Missing original");
+    const report = matchInkSources(
+      document,
+      "source",
+      [source(1, "天气", original)],
+      lines(...sourceTexts),
+      { context: "boundary-edits" },
+    );
+    expect(report.bindings).toEqual([]);
+    expect(report.unusedSources[0]?.reason).toBe("ambiguous-occurrence");
+  }
+  const document = await prepareDocument("天气。\n\n天气！");
+  const report = matchInkSources(
+    document,
+    "source",
+    [source(1, "天气", "①天气")],
+    lines("①天气"),
+    { context: "boundary-edits" },
+  );
+  expect(report.bindings).toEqual([]);
+  expect(report.unusedSources[0]?.reason).toBe("ambiguous-occurrence");
+});
+
+test("boundary variants never create empty passages or ignore internal edits and other boundary characters", async () => {
+  for (const [original, target, fragment] of [
+    ["④。！？", "①!", "。"],
+    ["①聚落", "聚落类型。", "聚落"],
+    ["①天气晴朗", "天气变晴朗。", "天气"],
+    ["①天气，晴朗", "天气晴朗。", "天气"],
+    ["1.天气", "天气。", "天气"],
+    ["①天气，", "天气。", "天气"],
+  ] as const) {
+    const document = await prepareDocument(target);
+    const report = matchInkSources(
+      document,
+      "source",
+      [source(1, fragment, original)],
+      lines(original),
+      { context: "boundary-edits" },
+    );
+    expect(report.bindings).toEqual([]);
+    expect(
+      report.alignments.every((alignment) => alignment.text.length > 0),
+    ).toBe(true);
+  }
+});
+
+test("boundary edits retain formatting boundaries and decimal points", async () => {
+  const document = await prepareDocument("天气**晴朗**。");
+  const report = matchInkSources(
+    document,
+    "source",
+    [source(1, "天气晴朗", "①天气晴朗")],
+    lines("①天气晴朗"),
+    { context: "boundary-edits" },
+  );
+  expect(report.bindings).toEqual([]);
+  expect(report.unusedSources[0]?.reason).toBe("format-boundary");
+  const decimal = await prepareDocument("3.14。");
+  const decimalReport = matchInkSources(
+    decimal,
+    "source",
+    [source(1, "3.14", "①3.14")],
+    lines("①3.14"),
+    { context: "boundary-edits" },
+  );
+  expect(decimalReport.bindings.map((binding) => binding.text)).toEqual([
+    "3.14",
+  ]);
+  expect(decimalReport.fontRanges.map((range) => range.text)).toEqual(["。"]);
+  expect(
+    matchInkSources(
+      await prepareDocument("3.14"),
+      "source",
+      [source(1, "3.14", "3.14.")],
+      lines("3.14."),
+      { context: "boundary-edits" },
+    ).bindings,
+  ).toEqual([]);
+});

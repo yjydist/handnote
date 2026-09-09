@@ -84,6 +84,220 @@ async function inspectHtml<T>(
 }
 
 describe("prepared ink rendering", () => {
+  test("touching PNGs with fractional source origins do not become negative gaps", async () => {
+    const document = await prepareDocument("甲乙");
+    const replacements = await Promise.all(
+      Array.from("甲乙", async (text, i) => ({
+        ...(await replacement(document, text, 1, 20)),
+        layout: {
+          mode: "shared-line" as const,
+          lineId: "source:0",
+          sourceTop: 0,
+          bodyHeight: 20,
+          bodyBottom: 20,
+          sourceSpan: { left: i === 0 ? 0.001 : 1.001, start: i, end: i + 1 },
+        },
+      })),
+    );
+    const result = await renderPreparedDocument(document, {
+      directory: await temporary(),
+      width: 720,
+      replacements,
+    });
+    expect(result.sourceSpacing[0]?.sourceGap).toBe(0);
+    expect(result.replacements.every((item) => item.mode === "ink")).toBe(true);
+  });
+
+  test("source spacing preserves original advances and disappears at a new line", async () => {
+    const document = await prepareDocument("甲乙丙");
+    const replacements = await Promise.all(
+      Array.from("甲乙丙", async (text, i) => ({
+        ...(await replacement(document, text, 80, 20)),
+        layout: {
+          mode: "shared-line" as const,
+          lineId: "source:0",
+          sourceTop: 0,
+          bodyHeight: 20,
+          bodyBottom: 20,
+          sourceSpan: { left: i * 100, start: i, end: i + 1 },
+        },
+      })),
+    );
+    const directory = await temporary();
+    const wide = await renderPreparedDocument(document, {
+      directory: `${directory}/wide`,
+      width: 720,
+      replacements,
+    });
+    const narrow = await renderPreparedDocument(document, {
+      directory: `${directory}/narrow`,
+      width: 400,
+      replacements,
+    });
+    const transformed = await renderPreparedDocument(document, {
+      directory: `${directory}/transformed`,
+      width: 720,
+      replacements: await Promise.all(
+        Array.from("甲乙丙", async (text, i) => ({
+          ...(await replacement(document, text, 160, 40)),
+          layout: {
+            mode: "shared-line" as const,
+            lineId: "shifted:0",
+            sourceTop: 23,
+            bodyHeight: 40,
+            bodyBottom: 63,
+            sourceSpan: { left: i * 200 + 17, start: i, end: i + 1 },
+          },
+        })),
+      ),
+    });
+    const first = wide.replacements[0];
+    if (!first?.bounds || !first.resolvedLayout)
+      throw new Error("Missing source layout");
+    const scale = first.resolvedLayout.fontSize / first.resolvedLayout.emSize;
+    for (const [i, item] of wide.replacements.entries()) {
+      expect(item.bounds?.x).toBeCloseTo(first.bounds.x + i * 100 * scale, 1);
+      expect(item.bounds?.y).toBeCloseTo(first.bounds.y, 1);
+      expect(item.mode).toBe("ink");
+      const moved = transformed.replacements[i]?.bounds;
+      expect(moved?.x).toBeCloseTo(item.bounds?.x ?? -1, 1);
+      expect(moved?.y).toBeCloseTo(item.bounds?.y ?? -1, 1);
+      expect(moved?.width).toBeCloseTo(item.bounds?.width ?? -1, 1);
+      expect(moved?.height).toBeCloseTo(item.bounds?.height ?? -1, 1);
+    }
+    expect(wide.sourceSpacing.map((gap) => gap.status)).toEqual([
+      "preserved",
+      "preserved",
+    ]);
+    expect(wide.sourceSpacing[0]?.pixels).toBeCloseTo(20 * scale, 1);
+    expect(narrow.sourceSpacing.map((gap) => gap.status)).toEqual([
+      "preserved",
+      "line-break",
+    ]);
+    expect(narrow.replacements[2]?.bounds?.x).toBeCloseTo(
+      narrow.replacements[0]?.bounds?.x ?? -1,
+      1,
+    );
+    expect(narrow.replacements[2]?.bounds?.y).toBeGreaterThan(
+      narrow.replacements[0]?.bounds?.y ?? -1,
+    );
+    expect(narrow.warnings).toEqual([]);
+    const reopened = await inspectHtml(narrow.htmlPath, 400, (page) =>
+      page.locator(".hn-ink-fragment").evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          x: node.getBoundingClientRect().x,
+          y: node.getBoundingClientRect().y,
+        })),
+      ),
+    );
+    for (const [i, bounds] of reopened.entries()) {
+      expect(bounds.x).toBeCloseTo(narrow.replacements[i]?.bounds?.x ?? -1, 1);
+      expect(bounds.y).toBeCloseTo(narrow.replacements[i]?.bounds?.y ?? -1, 1);
+    }
+  }, 30_000);
+
+  test("spacing participates in punctuation fallback and disappears beside font replacements", async () => {
+    const document = await prepareDocument("甲，乙");
+    const replacements = await Promise.all(
+      Array.from("甲，乙", async (text, i) => ({
+        ...(await replacement(document, text, i === 1 ? 10 : 80, 20)),
+        layout: {
+          mode: "shared-line" as const,
+          lineId: "source:0",
+          sourceTop: 0,
+          bodyHeight: 20,
+          bodyBottom: 20,
+          sourceSpan: { left: [0, 700, 730][i] ?? 0, start: i, end: i + 1 },
+        },
+      })),
+    );
+    const result = await renderPreparedDocument(document, {
+      directory: await temporary(),
+      width: 720,
+      replacements,
+    });
+    expect(result.replacements.map((item) => item.mode)).toEqual([
+      "font",
+      "font",
+      "ink",
+    ]);
+    expect(result.sourceSpacing.map((gap) => gap.status)).toEqual([
+      "font-fallback",
+      "font-fallback",
+    ]);
+    expect(result.sourceSpacing.every((gap) => gap.pixels === 0)).toBe(true);
+    expect(result.warnings).toEqual([]);
+    const remaining = await inspectHtml(result.htmlPath, 720, (page) =>
+      page.locator(".hn-ink-gap").count(),
+    );
+    expect(remaining).toBe(0);
+  }, 30_000);
+
+  test("source gaps are not invented across omitted source text", async () => {
+    const document = await prepareDocument("甲乙");
+    const replacements = await Promise.all(
+      Array.from("甲乙", async (text, i) => ({
+        ...(await replacement(document, text, 80, 20)),
+        layout: {
+          mode: "shared-line" as const,
+          lineId: "source:0",
+          sourceTop: 0,
+          bodyHeight: 20,
+          bodyBottom: 20,
+          sourceSpan: { left: i * 500, start: i * 2, end: i * 2 + 1 },
+        },
+      })),
+    );
+    const result = await renderPreparedDocument(document, {
+      directory: await temporary(),
+      width: 720,
+      replacements,
+    });
+    expect(result.sourceSpacing).toEqual([]);
+    const a = result.replacements[0]?.bounds,
+      b = result.replacements[1]?.bounds;
+    if (!a || !b) throw new Error("Missing gap evidence");
+    expect(b.x - a.x - a.width).toBeCloseTo(0, 1);
+  }, 30_000);
+
+  test("source span validation rejects invalid offsets and overlapping PNGs before rendering", async () => {
+    const document = await prepareDocument("甲乙");
+    const first = {
+      ...(await replacement(document, "甲", 80, 20)),
+      layout: {
+        mode: "shared-line" as const,
+        lineId: "source:0",
+        sourceTop: 0,
+        bodyHeight: 20,
+        bodyBottom: 20,
+        sourceSpan: { left: 0, start: 0, end: 1 },
+      },
+    };
+    const second = {
+      ...(await replacement(document, "乙", 80, 20)),
+      layout: { ...first.layout, sourceSpan: { left: 70, start: 1, end: 2 } },
+    };
+    await expect(
+      renderPreparedDocument(document, {
+        directory: await temporary(),
+        width: 720,
+        replacements: [first, second],
+      }),
+    ).rejects.toThrow("non-overlapping image bounds");
+    for (const sourceSpan of [
+      { left: NaN, start: 0, end: 1 },
+      { left: 0, start: -1, end: 0 },
+      { left: 0, start: 0, end: 2 },
+    ])
+      await expect(
+        renderPreparedDocument(document, {
+          directory: await temporary(),
+          width: 720,
+          replacements: [{ ...first, layout: { ...first.layout, sourceSpan } }],
+        }),
+      ).rejects.toThrow("exact source text offsets");
+  });
+
   test("shared metrics remain fixed when another fragment is omitted or source coordinates are rescaled", async () => {
     const document = await prepareDocument("甲乙");
     const first = {

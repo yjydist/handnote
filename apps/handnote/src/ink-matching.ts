@@ -56,9 +56,13 @@ interface Passage {
   text: string;
 }
 
-function passages(owner: string, text: string): Passage[] {
+function passages(
+  owner: string,
+  text: string,
+  context: "exact" | "boundary-edits",
+): Passage[] {
   const result: Passage[] = [];
-  const add = (start: number, end: number) => {
+  const append = (start: number, end: number) => {
     while (start < end && /\s/u.test(text[start] ?? "")) start++;
     while (end > start && /\s/u.test(text[end - 1] ?? "")) end--;
     if (
@@ -66,6 +70,23 @@ function passages(owner: string, text: string): Passage[] {
       !result.some((entry) => entry.start === start && entry.end === end)
     )
       result.push({ owner, start, end, text: text.slice(start, end) });
+  };
+  const add = (start: number, end: number) => {
+    append(start, end);
+    if (context === "exact") return;
+    while (start < end && /\s/u.test(text[start] ?? "")) start++;
+    while (end > start && /\s/u.test(text[end - 1] ?? "")) end--;
+    let bodyStart = start;
+    if (/[①-⑳]/u.test(text[bodyStart] ?? "")) {
+      bodyStart++;
+      while (bodyStart < end && /\s/u.test(text[bodyStart] ?? "")) bodyStart++;
+    }
+    let bodyEnd = end;
+    while (bodyEnd > bodyStart && /[。！？!?]/u.test(text[bodyEnd - 1] ?? ""))
+      bodyEnd--;
+    append(bodyStart, end);
+    append(start, bodyEnd);
+    append(bodyStart, bodyEnd);
   };
   add(0, text.length);
   let start = 0;
@@ -91,6 +112,7 @@ export function matchInkSources(
   sourceHash: string,
   sources: readonly MatchingSource[],
   sourceLines: readonly SourceLine[],
+  options: { context?: "exact" | "boundary-edits" } = {},
 ): BindingReport {
   const lines = new Map<string, SourceLine>();
   for (const line of sourceLines) {
@@ -135,9 +157,11 @@ export function matchInkSources(
     flows.set(range.flowId, previous + range.text);
   }
   const original = sourceLines.flatMap((line) =>
-    passages(line.lineId, line.text),
+    passages(line.lineId, line.text, options.context ?? "exact"),
   );
-  const targets = [...flows].flatMap(([id, text]) => passages(id, text));
+  const targets = [...flows].flatMap(([id, text]) =>
+    passages(id, text, options.context ?? "exact"),
+  );
   const alignments: PassageAlignment[] = [];
   const ambiguous: Passage[] = [];
   for (const passage of original) {

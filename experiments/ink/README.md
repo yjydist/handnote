@@ -35,3 +35,65 @@ bun experiments/ink/review-cases.ts --prepared runs/ink-experiments/my-input --a
 普通应用在 `apps/handnote`，仍通过根兼容入口工作。模型循环归 `@handnote/agent`，渲染与笔迹分别由 `@handnote/renderer`、`@handnote/ink` 提供；来源匹配通过应用的 `@handnote/app/ink-matching` 入口调用。图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，未升级生产存储格式。
 
 首轮实测见 [RESULTS.md](RESULTS.md)，第二轮实测、验证与提交记录见 [RESULTS-round2.md](RESULTS-round2.md)。第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配；第 70 页自动覆盖从 2/30 降为 0/30，所有结果仍待人工核验。
+
+## 第三轮 OCR 输入对照
+
+固定三页来源、Markdown、PP-OCRv5 模型及所有阈值，对比整页 2 倍重绘和基线全部 OCR 行的局部重识别。每个行框四周增加半个行高留白，再映射到 2 倍重绘图、向外取整并裁到图片边界。裁剪保留邻行和装饰笔画，不人为清理输入；退化的基线行框明确失败，不悄悄跳过。局部结果只参与诊断，不能进入 Markdown 绑定。
+
+以下 `prepared` 是固定三页准备目录，`baseline` 是第二轮复用的原始完整 OCR 运行目录，`variants` 是 Python 本次输出的新运行目录：
+
+```sh
+bun experiments/ink/ocr-inputs.ts --prepared <prepared> --baseline-ocr <baseline> --output <new-inputs>
+experiments/ink/ocr/.venv/bin/python experiments/ink/ocr/runner.py --input-manifest <new-inputs>/ocr-input.json
+bun experiments/ink/ocr-diagnostics.ts --prepared <prepared> --baseline-ocr <baseline> --variant-ocr <variants> --output <new-diagnostics>
+bun experiments/ink/ocr-comparison.ts --prepared <prepared> --baseline-ocr <baseline> --variant-ocr <variants> --output <new-comparison>
+```
+
+诊断索引逐行展示文字、分数、退化字框、完整笔画引用与行度量；原坐标内的框相交仅用于并列证据，不代表识别文字或来源相同。局部裁剪输出包括识别到的所有邻行。排版索引提供普通字体、基线自动、整页 2 倍自动三模式 × 三宽度，共 27 张图片。
+
+新输入及结果保留 `inputId`、`variant`、来源和基线 OCR 哈希，局部输入另有 `baselineLineId`、像素裁剪框及原轨迹到裁剪图的变换。消费结果前重建图片和坐标变换进行校验。所有产物目录拒绝覆盖；基线 OCR 原始文件复制到输入目录，绝对证据路径意味着移动目录后需重新准备和运行。Python 记录检测器实际收到的张量尺寸，详见 [OCR 环境说明](ocr/README.md)。
+
+第三轮结论见 [RESULTS-round3.md](RESULTS-round3.md)。覆盖仍以固定摘录为分母，来源与视觉判断均待人工核验。
+
+## 第四轮独立探索
+
+在第三轮已保存的输入上，对照保留整页上下文的局部识别修补、外侧笔画度量、有限句段边界变化，以及连续来源片段的原始空隙。第三轮入口仍保持局部结果仅用于诊断；以下独立入口显式启用后续实验：
+
+```sh
+bun experiments/ink/refinement.ts --prepared <prepared> --baseline-ocr <baseline> --variant-ocr <variants> --output <new-refinement>
+```
+
+第四轮历史产物为五模式 × 三页 × 三宽度的 45 张图片，方法、负面尝试和限制见 [RESULTS-round4.md](RESULTS-round4.md)。当前入口增加可换行的来源间距模式和 360px 压力宽度，共六模式 × 三页 × 四宽度的 72 张图片，继续保存每个局部结果的取舍及显示片段对应的原始笔画。
+
+完整来源段的重绘仍作为间距对照；新增模式只组合包围盒相交的连续片段，并保留组间换行机会。详情见 [RESULTS-round5.md](RESULTS-round5.md)。
+
+## 第六轮字身高度与绘制对照
+
+冻结第五轮已核验的来源、绑定和可换行间距，比较完整行边界与可测汉字高度中位数两种缩放参考，以及 PNG 与原生 SVG 两种绘制方式：
+
+```sh
+bun experiments/ink/readability.ts --prepared <prepared> --baseline-ocr <baseline> --frozen <verified-round5-directory> --output <new-readability>
+```
+
+输出三页 × 四宽度 × 四模式的 48 张图片，逐字保存完整笔画归属及无法测量的原因。字高参考只用于原行度量已经可用的实验目标；SVG 只在受控浏览器中替换由相同原始点生成的图片，正式渲染入口仍只接受 PNG。冻结报告、基线 OCR 与来源失效会拒绝运行，输出拒绝覆盖。结果与样本局限见 [RESULTS-round6.md](RESULTS-round6.md)。
+
+## 第七轮字框重叠诊断
+
+固定原 OCR 的文字、分数、行框、字序和所有阈值，在相邻字框的重叠区分别取 1/4、1/2、3/4 分界，检查完整笔画样本对定位变化的敏感性：
+
+```sh
+bun experiments/ink/word-box-diagnostics.ts --prepared <prepared> --baseline-ocr <baseline> --output <new-word-box-diagnostics>
+```
+
+输出全部 67 行 × 四模式的 268 张叠图，原始和合成 OCR 分开保存。退化、倒序和无效切分整行不改；合成关联仅用于诊断，不进入自动绑定。Paddle 字框机制、分界实验及保留的负面结果见 [RESULTS-round7.md](RESULTS-round7.md)。
+
+## 第八轮实际裁图坐标回映
+
+使用运行器的 `--capture-word-geometry` 保存实际 OCR 裁图四边形、CTC 列信息和识别张量尺寸，再比较原字框与从实际识别裁图投回输入图的字框：
+
+```sh
+experiments/ink/ocr/.venv/bin/python experiments/ink/ocr/runner.py --input-manifest <prepared>/ocr-input.json --capture-word-geometry
+bun experiments/ink/geometry-diagnostics.ts --prepared <prepared> --baseline-ocr <baseline> --geometry-ocr <captured-run> --output <new-geometry-comparison>
+```
+
+固定三页全部 67 行，输出 134 张叠图和四模式 × 三页 × 四宽度的 48 张排版。原 OCR 与合成字框分开保存，校验输入身份、实现哈希和实际裁图变换；重复输出被拒绝。倾斜行零高框修复后的分数阻塞，以及正文度量受另一行影响的回退证据，见 [RESULTS-round8.md](RESULTS-round8.md)。

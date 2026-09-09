@@ -31,7 +31,25 @@ export interface InkReplacement {
     readonly sourceTop: number;
     readonly bodyHeight: number;
     readonly bodyBottom: number;
+    /** PNG left in source units and UTF-16 offsets in the original source line. */
+    readonly sourceSpan?: {
+      readonly left: number;
+      readonly start: number;
+      readonly end: number;
+    };
   };
+}
+
+export interface InkSourceSpacing {
+  readonly previousTargetId: string;
+  readonly targetId: string;
+  readonly sourceGap: number;
+  readonly pixels: number;
+  readonly status:
+    | "preserved"
+    | "line-break"
+    | "font-fallback"
+    | "different-scale";
 }
 
 export interface InkReplacementResult {
@@ -127,6 +145,42 @@ function fragmentElement(
         children: [],
       },
     ],
+  };
+}
+
+function sourceGapElement(
+  previous: InkReplacement,
+  next: InkReplacement,
+): Element | undefined {
+  const before = previous.layout?.sourceSpan;
+  const after = next.layout?.sourceSpan;
+  if (
+    !before ||
+    !after ||
+    previous.layout?.lineId !== next.layout?.lineId ||
+    previous.target.documentHash !== next.target.documentHash ||
+    previous.target.rangeId !== next.target.rangeId ||
+    previous.target.end !== next.target.start ||
+    before.end !== after.start
+  )
+    return;
+  const gap = after.left - (before.left + previous.width);
+  if (!Number.isFinite(gap) || gap < 0)
+    throw new InkReplacementError(
+      "Source spacing requires non-overlapping image bounds; combine overlapping source fragments first",
+    );
+  return {
+    type: "element",
+    tagName: "span",
+    properties: {
+      className: ["hn-ink-gap"],
+      ariaHidden: "true",
+      dataHnGapFrom: `${previous.target.rangeId}:${previous.target.start}-${previous.target.end}`,
+      dataHnGapTo: `${next.target.rangeId}:${next.target.start}-${next.target.end}`,
+      dataHnSourceGap: gap,
+      style: "font-size:0;line-height:0;word-spacing:0px",
+    },
+    children: [{ type: "text", value: " " }],
   };
 }
 
@@ -265,6 +319,19 @@ async function validateReplacement(
   document: PreparedDocument,
   replacement: InkReplacement,
 ): Promise<void> {
+  const sourceSpan = replacement.layout?.sourceSpan;
+  if (
+    sourceSpan &&
+    (!Number.isFinite(sourceSpan.left) ||
+      !Number.isSafeInteger(sourceSpan.start) ||
+      sourceSpan.start < 0 ||
+      !Number.isSafeInteger(sourceSpan.end) ||
+      sourceSpan.end <= sourceSpan.start ||
+      sourceSpan.end - sourceSpan.start !== replacement.text.length)
+  )
+    throw new InkReplacementError(
+      "Source span requires finite image origin and exact source text offsets",
+    );
   if (
     replacement.layout &&
     (replacement.layout.mode !== "shared-line" ||
@@ -337,7 +404,12 @@ export async function renderPreparedDocument(
     width: number;
     replacements: readonly InkReplacement[];
   },
-): Promise<RenderResult & { replacements: InkReplacementResult[] }> {
+): Promise<
+  RenderResult & {
+    replacements: InkReplacementResult[];
+    sourceSpacing: InkSourceSpacing[];
+  }
+> {
   validateTargets(
     prepared,
     options.replacements.map(({ target }) => target),
@@ -347,6 +419,7 @@ export async function renderPreparedDocument(
     return {
       ...(await renderDocument(note, options.directory, options.width)),
       replacements: [],
+      sourceSpacing: [],
     };
   await Promise.all(
     options.replacements.map((replacement) =>
@@ -393,6 +466,7 @@ export async function renderPreparedDocument(
     if (!range) throw new Error("Missing prepared range");
     const children: ElementContent[] = [];
     let cursor = 0;
+    let previous: InkReplacement | undefined;
     for (const { replacement, report } of entries.sort(
       (a, b) => a.replacement.target.start - b.replacement.target.start,
     )) {
@@ -405,7 +479,12 @@ export async function renderPreparedDocument(
           type: "text",
           value: range.node.value.slice(cursor, start),
         });
+      if (previous) {
+        const gap = sourceGapElement(previous, replacement);
+        if (gap) children.push(gap);
+      }
       children.push(fragmentElement(replacement, report.targetId));
+      previous = replacement;
       cursor = end;
     }
     if (cursor < range.node.value.length)
@@ -420,6 +499,7 @@ export async function renderPreparedDocument(
   }
   note.html = String(unified().use(rehypeStringify).stringify(tree));
   let finalReports = reports;
+  let sourceSpacing: InkSourceSpacing[] = [];
   const rendered = await renderCompiledDocument(
     note,
     options.directory,
@@ -520,6 +600,41 @@ export async function renderPreparedDocument(
           targetId: `${target.rangeId}:${target.start}-${target.end}`,
         })),
       );
+      const requestedSpacing = await page.evaluate((layouts) => {
+        const byTarget = new Map(
+          layouts.map((item) => [item.targetId, item.layout]),
+        );
+        return Array.from(
+          document.querySelectorAll<HTMLElement>(".hn-ink-gap"),
+          (gap) => {
+            const previousTargetId = gap.dataset.hnGapFrom ?? "";
+            const targetId = gap.dataset.hnGapTo ?? "";
+            const before = byTarget.get(previousTargetId);
+            const after = byTarget.get(targetId);
+            if (!before || !after)
+              throw new Error("Missing source spacing layout");
+            const sourceGap = Number(gap.dataset.hnSourceGap);
+            const sameScale =
+              before.fontSize / before.emSize === after.fontSize / after.emSize;
+            const pixels = sameScale
+              ? (sourceGap * after.fontSize) / after.emSize
+              : 0;
+            if (!Number.isFinite(pixels))
+              throw new Error("Invalid source spacing scale");
+            if (sameScale) gap.style.wordSpacing = `${pixels}px`;
+            else gap.remove();
+            return {
+              previousTargetId,
+              targetId,
+              sourceGap,
+              pixels,
+              status: sameScale
+                ? ("preserved" as const)
+                : ("different-scale" as const),
+            };
+          },
+        );
+      }, resolvedLayouts);
       const fallbackEntries = await page.evaluate(() => {
         const fallbacks = new Map<
           string,
@@ -559,6 +674,45 @@ export async function renderPreparedDocument(
         }
         return [...fallbacks];
       });
+      sourceSpacing = await page.evaluate((entries) => {
+        const fragments = new Set(
+          Array.from(
+            document.querySelectorAll<HTMLElement>(".hn-ink-fragment"),
+            (fragment) => fragment.dataset.hnTarget,
+          ),
+        );
+        const gaps = Array.from(
+          document.querySelectorAll<HTMLElement>(".hn-ink-gap"),
+        );
+        for (const gap of gaps)
+          if (
+            !fragments.has(gap.dataset.hnGapFrom) ||
+            !fragments.has(gap.dataset.hnGapTo)
+          )
+            gap.remove();
+        return entries.map((entry) => {
+          if (
+            !fragments.has(entry.previousTargetId) ||
+            !fragments.has(entry.targetId)
+          )
+            return { ...entry, pixels: 0, status: "font-fallback" as const };
+          const gap = gaps.find(
+            (gap) =>
+              gap.dataset.hnGapFrom === entry.previousTargetId &&
+              gap.dataset.hnGapTo === entry.targetId,
+          );
+          if (!gap) return entry;
+          const pixels = gap.getBoundingClientRect().width;
+          return {
+            ...entry,
+            pixels,
+            status:
+              entry.sourceGap > 0 && pixels === 0
+                ? ("line-break" as const)
+                : ("preserved" as const),
+          };
+        });
+      }, requestedSpacing);
       await page.evaluate(async () => {
         await document.fonts.ready;
         await new Promise<void>((resolve) => {
@@ -592,5 +746,5 @@ export async function renderPreparedDocument(
       );
     },
   );
-  return { ...rendered, replacements: finalReports };
+  return { ...rendered, replacements: finalReports, sourceSpacing };
 }
