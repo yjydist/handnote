@@ -22,6 +22,14 @@ bun run eval:ink:auto --prepared runs/ink-experiments/my-input --ocr-run runs/in
 
 自动实验在创建输出前，验证固定来源、Markdown、重绘 PNG 哈希、坐标变换和 OCR `input_path`。运行结果保存原始 OCR、完整来源候选、绑定、逐层回退、耗时及实际图片。报告中的覆盖分母仅为固定摘录的非空白可见字符；来源候选统计则覆盖完整开发页，两者不能直接相除。阈值是尚未校准的开发默认值。
 
+可根据固定开发来源及自动结果生成聚落实例、重复天气和退化字框的核验材料：
+
+```sh
+bun experiments/ink/review-cases.ts --prepared runs/ink-experiments/my-input --automatic runs/ink-experiments/my-automatic --output runs/ink-experiments/my-review
+```
+
+核验索引保留原 OCR 行号、字框及完整笔画编号。字框附近的未分配笔画只表示几何邻近，不能据此认定字归属；所有案例仍待人工核验。
+
 这些命令保留既有产物，生成文件位于 Git 忽略的 `runs/`。复现时需要原始开发数据以及对应 OCR 输入图片；原始 OCR 记录包含绝对图片路径，移动实验目录后应重新运行 OCR。锁定模型、依赖、固定小型 OCR 测试结果及实验代码随仓库提交，大型模型和运行产物不提交。
 
 普通应用仍通过现有入口工作。包入口分别为 `@handnote/renderer` 与 `@handnote/ink`，图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，也没有拆分 Agent 或升级生产存储格式。
