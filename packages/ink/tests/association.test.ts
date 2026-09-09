@@ -55,6 +55,74 @@ function associate(
 }
 
 describe("complete-trajectory OCR association", () => {
+  test("shares complete visible line metrics independently of OCR padding", () => {
+    const paths = [
+      [
+        [5, 5],
+        [5, 15],
+      ],
+      [
+        [19, 7],
+        [19, 13],
+      ],
+    ];
+    const original = associate(paths);
+    const padded = raw();
+    padded.rec_boxes = [[-5, -5, 29, 25]];
+    const enlarged = associate(paths, padded);
+    expect(original.lines[0]?.metrics).toEqual({
+      status: "available",
+      method: "complete-line-visible-envelope",
+      visibleBounds: { x: 4.5, y: 4.5, width: 15, height: 11 },
+      bodyHeight: 11,
+      bodyBottom: 15.5,
+      strokeIndices: [0, 1],
+    });
+    const originalMetrics = original.lines[0]?.metrics;
+    if (!originalMetrics) throw new Error("Missing source line metrics");
+    expect(enlarged.lines[0]?.metrics).toEqual(originalMetrics);
+  });
+
+  test("withholds shared line metrics when any source word is incomplete", () => {
+    const report = associate([
+      [
+        [5, 5],
+        [5, 15],
+      ],
+    ]);
+    expect(report.candidates).toHaveLength(1);
+    expect(report.lines[0]?.metrics).toEqual({
+      status: "unavailable",
+      reason: "incomplete-line-metrics",
+    });
+  });
+
+  test("withholds line metrics for unresolved nearby ink even when all words have candidates", () => {
+    const report = associate(
+      [
+        [
+          [5, 5],
+          [5, 15],
+        ],
+        [
+          [-200, 10],
+          [0, 10],
+          [-200, 100],
+        ],
+      ],
+      raw(["人"]),
+    );
+    expect(report.candidates).toHaveLength(1);
+    expect(report.unusedWords).toEqual([]);
+    expect(
+      report.unusedStrokes[0]?.evidence.some((item) => item.lineId === 0),
+    ).toBe(true);
+    expect(report.lines[0]?.metrics).toEqual({
+      status: "unavailable",
+      reason: "incomplete-line-metrics",
+    });
+  });
+
   test("keeps repeated occurrences separate and never shares strokes", () => {
     const report = associate([
       [

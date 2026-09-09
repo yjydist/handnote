@@ -26,6 +26,32 @@ export interface Bounds {
   readonly height: number;
 }
 
+export interface InkLineMetrics {
+  readonly status: "available";
+  readonly method: "complete-line-visible-envelope";
+  readonly visibleBounds: Bounds;
+  readonly bodyHeight: number;
+  readonly bodyBottom: number;
+  readonly strokeIndices: readonly number[];
+}
+
+/** The caller supplies the complete source line, independently of target fragments. */
+export function measureCompleteInkLine(
+  document: InkDocument,
+  strokeIndices: readonly number[],
+): InkLineMetrics {
+  const strokes = selectStrokes(document, strokeIndices);
+  const visibleBounds = boundsFor(strokes);
+  return Object.freeze({
+    status: "available",
+    method: "complete-line-visible-envelope",
+    visibleBounds,
+    bodyHeight: visibleBounds.height,
+    bodyBottom: visibleBounds.y + visibleBounds.height,
+    strokeIndices: Object.freeze(strokes.map((stroke) => stroke.index)),
+  });
+}
+
 export interface StrokeReference {
   readonly sourceHash: string;
   readonly strokeIndex: number;

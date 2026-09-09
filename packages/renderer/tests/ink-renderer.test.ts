@@ -84,6 +84,173 @@ async function inspectHtml<T>(
 }
 
 describe("prepared ink rendering", () => {
+  test("shared metrics remain fixed when another fragment is omitted or source coordinates are rescaled", async () => {
+    const document = await prepareDocument("甲乙");
+    const first = {
+      ...(await replacement(document, "甲", 30, 40)),
+      layout: {
+        mode: "shared-line" as const,
+        lineId: "source:0",
+        sourceTop: 10,
+        bodyHeight: 40,
+        bodyBottom: 50,
+      },
+    };
+    const second = {
+      ...(await replacement(document, "乙", 15, 20)),
+      layout: {
+        ...first.layout,
+        sourceTop: 25,
+      },
+    };
+    const directory = await temporary();
+    const together = await renderPreparedDocument(document, {
+      directory: `${directory}/together`,
+      width: 720,
+      replacements: [first, second],
+    });
+    const alone = await renderPreparedDocument(document, {
+      directory: `${directory}/alone`,
+      width: 720,
+      replacements: [first],
+    });
+    const scaled = {
+      ...(await replacement(document, "甲", 90, 120)),
+      layout: {
+        mode: "shared-line" as const,
+        lineId: "shifted:0",
+        sourceTop: 19,
+        bodyHeight: 120,
+        bodyBottom: 139,
+      },
+    };
+    const transformed = await renderPreparedDocument(document, {
+      directory: `${directory}/scaled`,
+      width: 720,
+      replacements: [scaled],
+    });
+    const togetherLayout = together.replacements[0]?.resolvedLayout;
+    if (!togetherLayout) throw new Error("Missing shared layout");
+    expect(alone.replacements[0]?.resolvedLayout).toEqual(togetherLayout);
+    expect(transformed.replacements[0]?.bounds?.width).toBeCloseTo(
+      alone.replacements[0]?.bounds?.width ?? -1,
+      1,
+    );
+    expect(transformed.replacements[0]?.bounds?.height).toBeCloseTo(
+      alone.replacements[0]?.bounds?.height ?? -1,
+      1,
+    );
+    expect(transformed.replacements[0]?.bounds?.y).toBeCloseTo(
+      alone.replacements[0]?.bounds?.y ?? -1,
+      1,
+    );
+  }, 30_000);
+  test("rejects conflicting metrics for fragments of the same source line", async () => {
+    const document = await prepareDocument("甲乙");
+    const first = await replacement(document, "甲");
+    const second = await replacement(document, "乙");
+    await expect(
+      renderPreparedDocument(document, {
+        directory: await temporary(),
+        width: 720,
+        replacements: [
+          {
+            ...first,
+            layout: {
+              mode: "shared-line",
+              lineId: "source:0",
+              sourceTop: 10,
+              bodyHeight: 40,
+              bodyBottom: 50,
+            },
+          },
+          {
+            ...second,
+            layout: {
+              mode: "shared-line",
+              lineId: "source:0",
+              sourceTop: 25,
+              bodyHeight: 20,
+              bodyBottom: 50,
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow("same source line must share body metrics");
+  });
+
+  test("shared source line metrics preserve size and vertical variation using loaded font ink metrics", async () => {
+    const document = await prepareDocument("甲乙");
+    const first = await replacement(document, "甲", 30, 40);
+    const second = await replacement(document, "乙", 15, 20);
+    const directory = await temporary();
+    const result = await renderPreparedDocument(document, {
+      directory,
+      width: 720,
+      replacements: [
+        {
+          ...first,
+          layout: {
+            mode: "shared-line",
+            lineId: "source:0",
+            sourceTop: 10,
+            bodyHeight: 40,
+            bodyBottom: 50,
+          },
+        },
+        {
+          ...second,
+          layout: {
+            mode: "shared-line",
+            lineId: "source:0",
+            sourceTop: 25,
+            bodyHeight: 40,
+            bodyBottom: 50,
+          },
+        },
+      ],
+    });
+    const measured = await inspectHtml(result.htmlPath, 720, (page) =>
+      page.evaluate(async () => {
+        const paragraph = globalThis.document.querySelector("p");
+        if (!paragraph) throw new Error("Missing paragraph");
+        const style = getComputedStyle(paragraph);
+        const ctx = globalThis.document
+          .createElement("canvas")
+          .getContext("2d");
+        if (!ctx) throw new Error("Missing canvas context");
+        ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        await globalThis.document.fonts.load(ctx.font, "国田目中");
+        const metrics = Array.from("国田目中", (text) => ctx.measureText(text));
+        const heights = metrics
+          .map((m) => m.actualBoundingBoxAscent + m.actualBoundingBoxDescent)
+          .sort((a, b) => a - b);
+        const descents = metrics
+          .map((m) => m.actualBoundingBoxDescent)
+          .sort((a, b) => a - b);
+        const marker = globalThis.document.createElement("span");
+        marker.style.cssText =
+          "display:inline-block;width:0;height:0;vertical-align:baseline";
+        paragraph.append(marker);
+        return {
+          height:
+            heights.slice(1, 3).reduce((sum, value) => sum + value, 0) / 2,
+          descent:
+            descents.slice(1, 3).reduce((sum, value) => sum + value, 0) / 2,
+          baseline: marker.getBoundingClientRect().bottom,
+        };
+      }),
+    );
+    const a = result.replacements[0]?.bounds;
+    const b = result.replacements[1]?.bounds;
+    if (!a || !b) throw new Error("Missing rendered bounds");
+    expect(a.height).toBeCloseTo(measured.height, 1);
+    expect(a.height / b.height).toBeCloseTo(2, 1);
+    expect(a.width / b.width).toBeCloseTo(2, 1);
+    expect((b.y - a.y) / a.height).toBeCloseTo(15 / 40, 1);
+    expect(a.y + a.height - measured.baseline).toBeCloseTo(measured.descent, 1);
+  }, 30_000);
+
   test("empty replacements retain ordinary HTML and PNG bytes", async () => {
     const directory = await temporary();
     const markdown = "# 标题\n\n普通 **正文** &amp; 列表。\n\n- 第一项";

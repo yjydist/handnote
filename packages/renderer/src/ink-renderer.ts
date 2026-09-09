@@ -24,6 +24,14 @@ export interface InkReplacement {
   readonly lineHeight: number;
   /** Baseline relative to the PNG top edge, in the same units as lineHeight. */
   readonly baseline: number;
+  /** Source geometry uses PNG pixel units; every fragment of a source line shares body metrics. */
+  readonly layout?: {
+    readonly mode: "shared-line";
+    readonly lineId: string;
+    readonly sourceTop: number;
+    readonly bodyHeight: number;
+    readonly bodyBottom: number;
+  };
 }
 
 export interface InkReplacementResult {
@@ -33,6 +41,14 @@ export interface InkReplacementResult {
   readonly text: string;
   readonly mode: "ink" | "font";
   readonly reason?: "too_wide" | "punctuation_group_too_wide";
+  readonly resolvedLayout?: {
+    readonly lineId: string;
+    readonly emSize: number;
+    readonly baseline: number;
+    readonly fontSize: number;
+    readonly fontBodyHeight: number;
+    readonly fontDescent: number;
+  };
   readonly bounds?: {
     readonly x: number;
     readonly y: number;
@@ -249,6 +265,18 @@ async function validateReplacement(
   document: PreparedDocument,
   replacement: InkReplacement,
 ): Promise<void> {
+  if (
+    replacement.layout &&
+    (replacement.layout.mode !== "shared-line" ||
+      !replacement.layout.lineId.trim() ||
+      !Number.isFinite(replacement.layout.sourceTop) ||
+      !Number.isFinite(replacement.layout.bodyBottom) ||
+      !Number.isFinite(replacement.layout.bodyHeight) ||
+      replacement.layout.bodyHeight <= 0)
+  )
+    throw new InkReplacementError(
+      "Shared line metrics must have a line identity and finite positive body height",
+    );
   const range = document.textRanges.find(
     ({ rangeId }) => rangeId === replacement.target.rangeId,
   );
@@ -325,6 +353,20 @@ export async function renderPreparedDocument(
       validateReplacement(prepared, replacement),
     ),
   );
+  const lineMetrics = new Map<string, NonNullable<InkReplacement["layout"]>>();
+  for (const { layout } of options.replacements) {
+    if (!layout) continue;
+    const existing = lineMetrics.get(layout.lineId);
+    if (
+      existing &&
+      (existing.bodyHeight !== layout.bodyHeight ||
+        existing.bodyBottom !== layout.bodyBottom)
+    )
+      throw new InkReplacementError(
+        "Fragments of the same source line must share body metrics",
+      );
+    lineMetrics.set(layout.lineId, layout);
+  }
   const reports: InkReplacementResult[] = options.replacements.map(
     (replacement) => ({
       target: { ...replacement.target },
@@ -383,6 +425,101 @@ export async function renderPreparedDocument(
     options.directory,
     options.width,
     async (page) => {
+      const resolvedLayouts = await page.evaluate(
+        async (entries) => {
+          const median = (values: number[]) => {
+            values.sort((a, b) => a - b);
+            return (
+              values.slice(1, 3).reduce((sum, value) => sum + value, 0) / 2
+            );
+          };
+          const context = document.createElement("canvas").getContext("2d");
+          if (!context)
+            throw new Error("Canvas font measurement is unavailable");
+          const measuredFonts = new Map<
+            string,
+            { height: number; descent: number }
+          >();
+          const results = [];
+          for (const entry of entries) {
+            const { layout } = entry;
+            if (!layout) continue;
+            const fragment = Array.from(
+              document.querySelectorAll<HTMLElement>(".hn-ink-fragment"),
+            ).find((element) => element.dataset.hnTarget === entry.targetId);
+            if (!fragment) throw new Error("Shared line target is missing");
+            const style = getComputedStyle(fragment);
+            const fontSize = Number.parseFloat(style.fontSize);
+            const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            let measured = measuredFonts.get(font);
+            if (!measured) {
+              const faces = await document.fonts.load(font, "国田目中");
+              if (
+                !faces.length ||
+                faces.some((face) => face.status !== "loaded")
+              )
+                throw new Error(
+                  "Shared line reference font could not be loaded",
+                );
+              context.font = font;
+              const metrics = Array.from("国田目中", (text) =>
+                context.measureText(text),
+              );
+              measured = {
+                height: median(
+                  metrics.map(
+                    (metric) =>
+                      metric.actualBoundingBoxAscent +
+                      metric.actualBoundingBoxDescent,
+                  ),
+                ),
+                descent: median(
+                  metrics.map((metric) => metric.actualBoundingBoxDescent),
+                ),
+              };
+              measuredFonts.set(font, measured);
+            }
+            const scale = measured.height / layout.bodyHeight;
+            const emSize = fontSize / scale;
+            const baseline =
+              layout.bodyBottom - measured.descent / scale - layout.sourceTop;
+            if (
+              ![fontSize, measured.height, scale, emSize].every(
+                (value) => Number.isFinite(value) && value > 0,
+              ) ||
+              !Number.isFinite(measured.descent) ||
+              !Number.isFinite(baseline) ||
+              ![
+                entry.width / emSize,
+                entry.height / emSize,
+                (baseline - entry.height) / emSize,
+              ].every(Number.isFinite)
+            )
+              throw new Error("Shared line font geometry is invalid");
+            fragment.style.width = `${entry.width / emSize}em`;
+            fragment.style.height = `${entry.height / emSize}em`;
+            fragment.style.verticalAlign = `${(baseline - entry.height) / emSize}em`;
+            results.push({
+              targetId: entry.targetId,
+              layout: {
+                lineId: layout.lineId,
+                emSize,
+                baseline,
+                fontSize,
+                fontBodyHeight: measured.height,
+                fontDescent: measured.descent,
+              },
+            });
+          }
+          return results;
+        },
+        options.replacements.map(({ layout, width, height, target }) => ({
+          layout,
+          width,
+          height,
+          targetId: `${target.rangeId}:${target.start}-${target.end}`,
+        })),
+      );
       const fallbackEntries = await page.evaluate(() => {
         const fallbacks = new Map<
           string,
@@ -429,8 +566,11 @@ export async function renderPreparedDocument(
         });
       });
       finalReports = await page.evaluate(
-        ({ entries, fallbackEntries }) => {
+        ({ entries, fallbackEntries, resolvedLayouts }) => {
           const fallbacks = new Map(fallbackEntries);
+          const layouts = new Map(
+            resolvedLayouts.map((entry) => [entry.targetId, entry.layout]),
+          );
           return entries.map((entry) => {
             const fragment = Array.from(
               document.querySelectorAll<HTMLElement>("[data-hn-target]"),
@@ -438,15 +578,17 @@ export async function renderPreparedDocument(
             if (!fragment) throw new Error("Rendered target is missing");
             const { x, y, width, height } = fragment.getBoundingClientRect();
             const reason = fallbacks.get(entry.targetId);
+            const resolvedLayout = layouts.get(entry.targetId);
             return {
               ...entry,
               mode: reason ? ("font" as const) : ("ink" as const),
               ...(reason ? { reason } : {}),
+              ...(resolvedLayout ? { resolvedLayout } : {}),
               bounds: { x, y, width, height },
             };
           });
         },
-        { entries: reports, fallbackEntries },
+        { entries: reports, fallbackEntries, resolvedLayouts },
       );
     },
   );

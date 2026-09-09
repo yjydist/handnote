@@ -3,8 +3,10 @@ import {
   createInkCandidate,
   type InkCandidate,
   type InkDocument,
+  type InkLineMetrics,
   type InkStroke,
   type InkTransform,
+  measureCompleteInkLine,
   type StrokeReference,
   strokeBounds,
 } from "./trajectory.ts";
@@ -71,6 +73,12 @@ export interface InkAssociationReport {
     recognitionScore: number;
     bounds: Bounds;
     unusedReason: Line["unusableReason"];
+    metrics:
+      | InkLineMetrics
+      | {
+          readonly status: "unavailable";
+          readonly reason: "incomplete-line-metrics";
+        };
   }[];
   readonly candidates: readonly AssociatedInkCandidate[];
   readonly unusedStrokes: readonly StrokeAssociation[];
@@ -565,13 +573,31 @@ export function associateInk(
     transform,
     thresholds: THRESHOLDS,
     thresholdStatus: "uncalibrated-development-defaults",
-    lines: lines.map((line, lineId) => ({
-      lineId,
-      text: line.text,
-      recognitionScore: line.score,
-      bounds: line.box,
-      unusedReason: line.unusableReason,
-    })),
+    lines: lines.map((line, lineId) => {
+      const strokeIndices = candidates
+        .filter((candidate) => candidate.lineId === lineId)
+        .flatMap((candidate) => candidate.strokeIndices);
+      return {
+        lineId,
+        text: line.text,
+        recognitionScore: line.score,
+        bounds: line.box,
+        unusedReason: line.unusableReason,
+        metrics:
+          !strokeIndices.length ||
+          line.unusableReason ||
+          unusedStrokes.some(
+            (stroke) =>
+              stroke.reason !== "long-decoration" &&
+              stroke.evidence.some(
+                (item) => item.lineId === lineId && item.nearbyRatio > 0,
+              ),
+          ) ||
+          unusedWords.some((word) => word.lineId === lineId)
+            ? { status: "unavailable", reason: "incomplete-line-metrics" }
+            : measureCompleteInkLine(document, strokeIndices),
+      };
+    }),
     candidates,
     unusedStrokes: unusedStrokes.sort((a, b) => a.strokeIndex - b.strokeIndex),
     unusedWords,
