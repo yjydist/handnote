@@ -200,7 +200,7 @@ export async function prepareExperiment(output: string): Promise<string> {
   });
   await writeFile(
     join(outputDirectory, "README.md"),
-    "# 原笔迹排版实验输入\n\n所有转写、片段、行高和基线均为待人工核验候选。候选由 agent 查看原图和轨迹片段准备，未使用 OCR 作为真值。Markdown 是固定实验摘录，覆盖分母只限摘录，不能报告整页准确率。\n\n每页保留原始 JSON、原图、统一黑色重绘、候选框叠图及全页与片段笔画编号叠图。编号是原数组的零基索引。透明片段仅包含完整笔画；未选择的轨迹不等于错误或无关。第 2 页括号笔画 800 未选入文字，第 69 页孤立点 883 归属不明并留在原图。第 69 页标题的两字分组也需要人工核验。\n\n排版与 OCR 对照共用源文件哈希和固定摘录。OCR 可读取 ocr-input.json；坐标满足 image = source * scale + translation。\n",
+    "# 原笔迹排版实验输入\n\n所有转写、片段、行高和基线均为待人工核验候选。候选由 agent 查看原图和轨迹片段准备，未使用 OCR 作为真值。Markdown 是固定实验摘录，覆盖分母只限摘录，不能报告整页准确率。\n\n每页保留原始 JSON、原图、统一黑色重绘、候选框叠图及全页与片段笔画编号叠图。编号是原数组的零基索引。透明片段仅包含完整笔画；未选择的轨迹不等于错误或无关。第 2 页括号笔画 800 未选入文字，第 69 页孤立点 883 归属不明并留在原图。三页标题的单字分组也需要人工核验；第 70 页第二字的转写尤其存疑。\n\n排版与 OCR 对照共用源文件哈希和固定摘录。OCR 可读取 ocr-input.json；坐标满足 image = source * scale + translation。\n",
     { flag: "wx" },
   );
   return outputDirectory;

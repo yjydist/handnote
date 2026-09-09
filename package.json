@@ -11,7 +11,8 @@
     "eval:real": "bun run scripts/real-eval.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "eval:ink:prepare": "bun experiments/ink/prepare.ts"
+    "eval:ink:prepare": "bun experiments/ink/prepare.ts",
+    "eval:ink": "bun experiments/ink/render.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.35",
