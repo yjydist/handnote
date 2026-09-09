@@ -1,0 +1,92 @@
+[
+  {
+    "element_type": "image",
+    "image_name": "a8ce8e181948437f910ccbe39c6bf725.png",
+    "bounding_box": {
+      "top": 148.18610295910938,
+      "bottom": 263.94225246053054,
+      "left": 504.49421082754577,
+      "right": 669.9968047428008
+    },
+    "layout_style": {
+      "z_index": 20,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "ad9cdf2cca80428a914db20dc68db864.png",
+    "bounding_box": {
+      "top": 305.70595258076315,
+      "bottom": 411.76908789414233,
+      "left": 515.3983701545183,
+      "right": 668.6866971037816
+    },
+    "layout_style": {
+      "z_index": 25,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "bb0fa39233ab4cfc80b6a82a59b45f46.png",
+    "bounding_box": {
+      "top": 88.67004243977551,
+      "bottom": 170.33724804012692,
+      "left": 323.4388407549188,
+      "right": 408.958273034532
+    },
+    "layout_style": {
+      "z_index": 17,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "9c9d4ad3ad74452399fec631473b22ec.png",
+    "bounding_box": {
+      "top": 609.1422692930383,
+      "bottom": 689.7323034718474,
+      "left": 543.432671743519,
+      "right": 673.528012632168
+    },
+    "layout_style": {
+      "z_index": 27,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "aedd5bea281044e284b03814262bd7a5.png",
+    "bounding_box": {
+      "top": 475.2457545100733,
+      "bottom": 557.5858898704109,
+      "left": 489.8694994334034,
+      "right": 576.0936034428134
+    },
+    "layout_style": {
+      "z_index": 34,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "10066527f07b4abdae2bd0e7da26770f.png",
+    "bounding_box": {
+      "top": 96.04308300146234,
+      "bottom": 307.53095109739644,
+      "left": 761.821799482089,
+      "right": 1108.3019238094703
+    },
+    "layout_style": {
+      "z_index": 39,
+      "angle": 0,
+      "scale": 1
+    }
+  }
+]

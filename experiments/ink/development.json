@@ -5,8 +5,8 @@
   "pages": [
     {
       "page": "2",
-      "source": "data/easy_notes/page1/2.json",
-      "sourceImage": "data/easy_notes/page1/2.png",
+      "source": "data/test_data/easy_notes/page1/2.json",
+      "sourceImage": "data/test_data/easy_notes/page1/2.png",
       "sourceHash": "f5634c84be85fadbb5dfce69355e81a8ac446144f33c5c644c3fe65527db1322",
       "markdown": "# 情节安排\n\n结尾方式：悲剧式、喜剧式、首尾呼应式。\n",
       "fragments": [
@@ -94,8 +94,8 @@
     },
     {
       "page": "69",
-      "source": "data/easy_notes/page4/69.json",
-      "sourceImage": "data/easy_notes/page4/69.png",
+      "source": "data/test_data/easy_notes/page4/69.json",
+      "sourceImage": "data/test_data/easy_notes/page4/69.png",
       "sourceHash": "2a47d4cae762f273247f5b5e380657aa297c3e34716c4e1a46cd0ddb8ba2cb18",
       "markdown": "# 天气\n\n天气：短时间、多变的。\n\n明天大风降温。\n\n天气：夜来风雨声，花落知多少。\n",
       "fragments": [
@@ -203,8 +203,8 @@
     },
     {
       "page": "70",
-      "source": "data/easy_notes/page5/70.json",
-      "sourceImage": "data/easy_notes/page5/70.png",
+      "source": "data/test_data/easy_notes/page5/70.json",
+      "sourceImage": "data/test_data/easy_notes/page5/70.png",
       "sourceHash": "65694df81c53813c18b95231679c1b60148e9f2ac51b011e4c304bfaecc86878",
       "markdown": "# 语言和宗教\n\n## 聚落类型\n\n形成有利条件：\n\n地形平坦、土壤肥沃、气候……\n",
       "fragments": [

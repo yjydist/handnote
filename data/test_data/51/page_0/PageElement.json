@@ -1,0 +1,17 @@
+[
+  {
+    "element_type": "image",
+    "image_name": "ce3edc4403f1450d84850168a10c3f01.png",
+    "bounding_box": {
+      "top": 609.8268270516039,
+      "bottom": 706.8608266031301,
+      "left": 76.3789098634303,
+      "right": 249.94676821616036
+    },
+    "layout_style": {
+      "z_index": 5,
+      "angle": 0,
+      "scale": 1
+    }
+  }
+]

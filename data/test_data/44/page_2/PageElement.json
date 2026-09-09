@@ -1,0 +1,92 @@
+[
+  {
+    "element_type": "image",
+    "image_name": "8e958d31b2c44731a237b51ffb83e7f5.png",
+    "bounding_box": {
+      "top": 13.139062148374498,
+      "bottom": 229.04406745700464,
+      "left": 582.4454452588947,
+      "right": 693.5730215206896
+    },
+    "layout_style": {
+      "z_index": 30,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "e31cc15f0ef14201aef44de650611d1e.png",
+    "bounding_box": {
+      "top": 389.5871635850436,
+      "bottom": 586.7419008036916,
+      "left": 356.27417897879656,
+      "right": 503.1984098996998
+    },
+    "layout_style": {
+      "z_index": 35,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "536db49983e841c6aee0995b00f65bbf.png",
+    "bounding_box": {
+      "top": 499.87606216990184,
+      "bottom": 700.2765501789977,
+      "left": 490.6745120121426,
+      "right": 679.4804906546763
+    },
+    "layout_style": {
+      "z_index": 27,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "669a596512f6477fa6035ddd7e6007e7.png",
+    "bounding_box": {
+      "top": 8.711734288849467,
+      "bottom": 399.35119541004633,
+      "left": 12.647231322979618,
+      "right": 277.174740428672
+    },
+    "layout_style": {
+      "z_index": 34,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "d652e3cda4cb4137999ab20a6b1fed13.png",
+    "bounding_box": {
+      "top": 601.5197985290205,
+      "bottom": 699.6764224386544,
+      "left": 357.4499568376543,
+      "right": 461.66563160590766
+    },
+    "layout_style": {
+      "z_index": 20,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "211f7f0192e047508c737848ffaa12a2.png",
+    "bounding_box": {
+      "top": 383.93615882348985,
+      "bottom": 489.0573502632809,
+      "left": 511.98061482169686,
+      "right": 689.8780157198048
+    },
+    "layout_style": {
+      "z_index": 28,
+      "angle": 0,
+      "scale": 1
+    }
+  }
+]

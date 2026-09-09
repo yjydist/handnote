@@ -1,0 +1,32 @@
+[
+  {
+    "element_type": "image",
+    "image_name": "81bd9c40302e4bbab38457da1b5e999d.png",
+    "bounding_box": {
+      "top": 125.75816688417112,
+      "bottom": 366.0917611604412,
+      "left": 57.52545654455649,
+      "right": 356.98874465070253
+    },
+    "layout_style": {
+      "z_index": 9,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "ec0a1d53836d4eb9a681aa590cab5e5d.png",
+    "bounding_box": {
+      "top": 237.2352531422364,
+      "bottom": 436.00621214928276,
+      "left": 757.5017346771668,
+      "right": 1114.7966403303287
+    },
+    "layout_style": {
+      "z_index": 7,
+      "angle": 0,
+      "scale": 1
+    }
+  }
+]

@@ -1,0 +1,77 @@
+[
+  {
+    "element_type": "image",
+    "image_name": "679ce6fdec224e93b7aafa252e3bca38.png",
+    "bounding_box": {
+      "top": 579.7797134064833,
+      "bottom": 702.7391291049981,
+      "left": 927.1104671546603,
+      "right": 1054.0620716745555
+    },
+    "layout_style": {
+      "z_index": 35,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "999ac1edb121440b84a082234c9db079.png",
+    "bounding_box": {
+      "top": 499.9927099198539,
+      "bottom": 582.385875859378,
+      "left": 569.2440733252029,
+      "right": 912.4073623929115
+    },
+    "layout_style": {
+      "z_index": 38,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "3c862bbc77db4c63b774388a06c21928.png",
+    "bounding_box": {
+      "top": 116.64393628207529,
+      "bottom": 240.68214654657078,
+      "left": 962.5854600866819,
+      "right": 1080.359114277213
+    },
+    "layout_style": {
+      "z_index": 25,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "6c744f81f84a4966bf404a770c4579af.png",
+    "bounding_box": {
+      "top": 5.52058027254257,
+      "bottom": 100.82511039924078,
+      "left": 968.3235163426631,
+      "right": 1083.5755062633214
+    },
+    "layout_style": {
+      "z_index": 24,
+      "angle": 0,
+      "scale": 1
+    }
+  },
+  {
+    "element_type": "image",
+    "image_name": "e66d8480238843328044005be0e42e13.png",
+    "bounding_box": {
+      "top": 9.014910959017554,
+      "bottom": 120.35650376385438,
+      "left": 43.32659174788423,
+      "right": 160.11847231239835
+    },
+    "layout_style": {
+      "z_index": 9,
+      "angle": 0,
+      "scale": 1
+    }
+  }
+]
