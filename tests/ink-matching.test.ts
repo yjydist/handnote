@@ -90,3 +90,21 @@ test("conflicting source strokes fall back independently of candidate order", as
     matchInkSources(document, "changed", sources, ["甲段", "乙段"]),
   ).toThrow("stale");
 });
+
+test("does not borrow unique fragments from unrelated source sentences for added text", async () => {
+  for (const [text, line, target] of [
+    ["新", "旧物换新", "这里增加新的定义。"],
+    ["天气", "今天的天气不错", "新增天气预报栏目。"],
+  ] as const) {
+    const document = await prepareDocument(target);
+    const report = matchInkSources(
+      document,
+      "source",
+      [source(1, text, line)],
+      [line],
+    );
+    expect(report.bindings).toEqual([]);
+    expect(report.unusedSources[0]?.reason).toBe("no-exact-context");
+    expect(report.fontRanges.map((range) => range.text)).toEqual([target]);
+  }
+});

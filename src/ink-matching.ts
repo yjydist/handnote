@@ -52,19 +52,16 @@ function contextScore(
   const after = source.lineText.slice(source.occurrence.end);
   if (left === before && right === after)
     return 1000 + before.length + after.length;
-  let prefix = 0;
-  while (
-    prefix < Math.min(after.length, right.length, 16) &&
-    after[prefix] === right[prefix]
+  if (
+    source.lineText.length >= 2 &&
+    left.endsWith(before) &&
+    right.startsWith(after)
   )
-    prefix++;
-  let suffix = 0;
-  while (
-    suffix < Math.min(before.length, left.length, 16) &&
-    before.at(-1 - suffix) === left.at(-1 - suffix)
-  )
-    suffix++;
-  return prefix + suffix;
+    return 500 + source.lineText.length;
+  const block = left + source.text + right;
+  if (block.length >= 2 && before.endsWith(left) && after.startsWith(right))
+    return 400 + block.length;
+  return 0;
 }
 
 /** Exact text and occurrence context only; uncertain instances remain font text. */
@@ -130,14 +127,6 @@ export function matchInkSources(
       });
       continue;
     }
-    const sourceCount = sourceLines.reduce(
-      (sum, line) => sum + occurrences(line, source.text).length,
-      0,
-    );
-    if (targets.length === 1 && sourceCount === 1) {
-      proposals.push({ source, target: first.target });
-      continue;
-    }
     targets.sort((a, b) => b.score - a.score);
     const best = targets[0] ?? first;
     const rivals = sourceLines.flatMap((lineText) =>
@@ -156,7 +145,7 @@ export function matchInkSources(
     ) {
       unusedSources.push({
         sourceId: source.id,
-        reason: "ambiguous-occurrence",
+        reason: best.score === 0 ? "no-exact-context" : "ambiguous-occurrence",
       });
       continue;
     }
