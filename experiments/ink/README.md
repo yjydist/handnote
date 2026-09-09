@@ -32,7 +32,7 @@ bun experiments/ink/review-cases.ts --prepared runs/ink-experiments/my-input --a
 
 这些命令保留既有产物，生成文件位于 Git 忽略的 `runs/`。复现时需要原始开发数据以及对应 OCR 输入图片；原始 OCR 记录包含绝对图片路径，移动实验目录后应重新运行 OCR。锁定模型、依赖、固定小型 OCR 测试结果及实验代码随仓库提交，大型模型和运行产物不提交。
 
-普通应用在 `apps/handnote`，仍通过根兼容入口工作。模型循环归 `@handnote/agent`，渲染与笔迹分别由 `@handnote/renderer`、`@handnote/ink` 提供；来源匹配通过应用的 `@handnote/app/ink-matching` 入口调用。图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，未升级生产存储格式。
+普通应用在 `apps/handnote`，仍通过根兼容入口工作。模型循环归 `@handnote/agent`，渲染与笔迹分别由 `@handnote/renderer`、`@handnote/ink` 提供；来源匹配通过应用的 `@handnote/app/ink-matching` 入口调用。图片授权、资产哈希与 run 事务仍由应用管理。以上自动匹配入口属于历史开发实验，使用原有格式；新的 v2 素材事务与模型驱动入口见本文末节。
 
 首轮实测见 [RESULTS.md](RESULTS.md)，第二轮实测、验证与提交记录见 [RESULTS-round2.md](RESULTS-round2.md)。第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配；第 70 页自动覆盖从 2/30 降为 0/30，所有结果仍待人工核验。
 
@@ -75,7 +75,7 @@ bun experiments/ink/refinement.ts --prepared <prepared> --baseline-ocr <baseline
 bun experiments/ink/readability.ts --prepared <prepared> --baseline-ocr <baseline> --frozen <verified-round5-directory> --output <new-readability>
 ```
 
-输出三页 × 四宽度 × 四模式的 48 张图片，逐字保存完整笔画归属及无法测量的原因。字高参考只用于原行度量已经可用的实验目标；SVG 只在受控浏览器中替换由相同原始点生成的图片，正式渲染入口仍只接受 PNG。冻结报告、基线 OCR 与来源失效会拒绝运行，输出拒绝覆盖。结果与样本局限见 [RESULTS-round6.md](RESULTS-round6.md)。
+输出三页 × 四宽度 × 四模式的 48 张图片，逐字保存完整笔画归属及无法测量的原因。字高参考只用于原行度量已经可用的实验目标；本轮历史入口只在受控浏览器中替换由相同原始点生成的 SVG，当时正式渲染入口只接受 PNG。冻结报告、基线 OCR 与来源失效会拒绝运行，输出拒绝覆盖。结果与样本局限见 [RESULTS-round6.md](RESULTS-round6.md)。
 
 ## 第七轮字框重叠诊断
 
@@ -97,3 +97,17 @@ bun experiments/ink/geometry-diagnostics.ts --prepared <prepared> --baseline-ocr
 ```
 
 固定三页全部 67 行，输出 134 张叠图和四模式 × 三页 × 四宽度的 48 张排版。原 OCR 与合成字框分开保存，校验输入身份、实现哈希和实际裁图变换；重复输出被拒绝。倾斜行零高框修复后的分数阻塞，以及正文度量受另一行影响的回退证据，见 [RESULTS-round8.md](RESULTS-round8.md)。
+
+## 模型驱动的整页原笔迹实验
+
+```sh
+bun run eval:ink:full --output runs/ink-full-page-01 --config config.yaml
+# 针对失败页的新运行，保留上次证据
+bun run eval:ink:full --output runs/ink-full-page-02 --config config.yaml --pages 2
+```
+
+入口只读取开发页 2、69、70 的原图和完整 points，固定来源哈希；不读取旧实验的 Markdown、OCR、字框或人工片段。复用当前模型配置，每页最多 50 步，保留所有中间图。输出目录必须不存在；中断后使用新目录重新运行，不恢复模型。七页留出及新增多页数据不参与此入口。
+
+每页使用正式 Agent 与 v2 修订事务，保留工具轨迹、编号/实际素材预览、模型实际收到的 JPEG、素材描述/SVG、各次修订以及审查时的四种宽度。运行结束后为当前有效修订导出 360、720、1200、1600 四宽成品与素材依赖索引，记录耗时、模型步骤/用量、失败原因和审计。没有有效修订的失败运行仍保留来源、工具轨迹和已生成素材。
+
+总索引为 `experiment.json`、`results.json`；每个 run 的 `experiment/evidence.json` 记录成品位置、哈希、布局反馈和素材清单。`runStatus: complete` 仅表示工具事务已确认，不能代替整页视觉验收。所有判断均为 `pending-human-review`，验收字段保持 `not-assessed`，需另行逐页对照原图、素材和成品。正式 CLI 的轨迹输入必须等待三页成品验收通过。

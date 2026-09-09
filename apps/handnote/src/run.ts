@@ -3,7 +3,7 @@ import { access, readdir, readFile, rm } from "node:fs/promises";
 import { basename, extname, relative, resolve } from "node:path";
 import { AgentError, createModelAccounting, runAgent } from "@handnote/agent";
 import sharp from "sharp";
-import { loadConfig } from "./config.ts";
+import { type HandnoteConfig, loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
 import type { RunResult } from "./manifest.ts";
@@ -99,14 +99,39 @@ export async function executeRun(
   const startedAt = isoWithOffset();
   const input = await validateInput(inputArgument);
   const config = await loadConfig(configArgument);
+  return executePreparedRun({
+    input,
+    config,
+    outputRoot: outputArgument,
+    startedAt,
+  });
+}
+
+export interface PreparedRunOptions {
+  input: Awaited<ReturnType<typeof validateInput>>;
+  config: HandnoteConfig;
+  outputRoot: string;
+  startedAt?: string;
+  inkSourceBytes?: Uint8Array;
+  model?: NonNullable<Parameters<typeof runAgent>[0]["model"]>;
+}
+
+export async function executePreparedRun(
+  options: PreparedRunOptions,
+): Promise<RunResult> {
+  const { input, config } = options;
+  const startedAt = options.startedAt ?? isoWithOffset();
   let store: RunStore;
   try {
     const allocated = await createUniqueDirectory(
-      resolve(outputArgument),
+      resolve(options.outputRoot),
       basename(input.path, input.extension),
     );
     store = await RunStore.create(allocated.path, {
       inputExtension: input.extension,
+      ...(options.inkSourceBytes === undefined
+        ? {}
+        : { inkSourceBytes: options.inkSourceBytes }),
       runId: allocated.id,
       startedAt,
       secrets: [config.model.apiKey],
@@ -142,6 +167,7 @@ export async function executeRun(
       });
       const result = await runAgent({
         config,
+        ...(options.model ? { model: options.model } : {}),
         handlers,
         source: { data: await readFile(sourcePath), mimeType: input.mimeType },
         onModelEvent: async (event) => {
