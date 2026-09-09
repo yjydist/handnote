@@ -10,25 +10,12 @@ export {
   renderInkAsset,
 } from "./assets.ts";
 export {
-  type AssociatedInkCandidate,
-  associateInk,
-  type InkAssociationReport,
-  type OcrProvenance,
-  type StrokeAssociation,
-  type UnusedStrokeReason,
-  type WordEvidence,
-} from "./association.ts";
-export {
   type Bounds,
-  createInkCandidate,
-  type InkCandidate,
   type InkDocument,
-  type InkLineMetrics,
   type InkPoint,
   type InkRendering,
   type InkStroke,
   type InkTransform,
-  measureCompleteInkLine,
   parseInkJson,
   renderInkSvg,
   type StrokeReference,

@@ -45,14 +45,6 @@ export interface CompiledNote {
   warnings: LayoutWarning[];
 }
 
-const compiledTrees = new WeakMap<CompiledNote, Root>();
-
-export function cloneCompiledTree(note: CompiledNote): Root {
-  const tree = compiledTrees.get(note);
-  if (!tree) throw new Error("Document was not compiled by this renderer");
-  return structuredClone(tree);
-}
-
 const blockTags = new Set([
   "p",
   "h1",
@@ -256,7 +248,6 @@ export async function compileNoteMarkdown(
     figures: 0,
   };
   let hasTitle = false;
-  let compiledTree: Root | undefined;
   const file = await unified()
     .use(remarkParse)
     .use(remarkGfm)
@@ -303,9 +294,6 @@ export async function compileNoteMarkdown(
       prepareHtml(tree, structure);
     })
     .use(rehypeKatex)
-    .use(() => (tree: Root) => {
-      compiledTree = tree;
-    })
     .use(rehypeStringify)
     .process(markdown);
   const warnings: LayoutWarning[] = file.messages.map((message) => {
@@ -331,7 +319,5 @@ export async function compileNoteMarkdown(
     structure,
     warnings,
   };
-  if (!compiledTree) throw new Error("Markdown compilation produced no tree");
-  compiledTrees.set(note, compiledTree);
   return note;
 }

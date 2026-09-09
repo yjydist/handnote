@@ -7,16 +7,12 @@
   "types": "./src/cli.ts",
   "exports": {
     ".": "./src/cli.ts",
-    "./evaluation": "./scripts/real-eval.ts",
-    "./ink-matching": "./src/ink-matching.ts"
+    "./evaluation": "./scripts/real-eval.ts"
   },
   "typesVersions": {
     "*": {
       "evaluation": [
         "scripts/real-eval.ts"
-      ],
-      "ink-matching": [
-        "src/ink-matching.ts"
       ]
     }
   },

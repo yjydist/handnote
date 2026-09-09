@@ -11,9 +11,6 @@
     "eval:real": "bun run scripts/real-eval.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "eval:ink:prepare": "bun experiments/ink/prepare.ts",
-    "eval:ink": "bun experiments/ink/render.ts",
-    "eval:ink:auto": "bun experiments/ink/automatic.ts",
     "eval:ink:full": "bun scripts/ink-eval.ts"
   },
   "dependencies": {

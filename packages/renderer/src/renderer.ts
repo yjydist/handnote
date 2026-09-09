@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { type Browser, chromium, type Page } from "playwright";
+import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
 import { parseSrcset } from "srcset";
 import { RenderError } from "./errors.ts";
@@ -94,7 +94,6 @@ async function screenshotTall(
   htmlPath: string,
   imagePath: string,
   width: number,
-  preparePage?: (page: Page) => Promise<void>,
 ): Promise<{
   width: number;
   height: number;
@@ -121,16 +120,6 @@ async function screenshotTall(
     undefined,
     { timeout: 30_000 },
   );
-  if (preparePage) {
-    await preparePage(page);
-    await page.evaluate(async () => {
-      await document.fonts.ready;
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-    });
-    await atomicWrite(htmlPath, await page.content());
-  }
   const result = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
     const height = Math.ceil(
@@ -333,15 +322,6 @@ export async function renderDocument(
   directory: string,
   width: number,
 ): Promise<RenderResult> {
-  return renderCompiledDocument(note, directory, width);
-}
-
-export async function renderCompiledDocument(
-  note: CompiledNote,
-  directory: string,
-  width: number,
-  preparePage?: (page: Page) => Promise<void>,
-): Promise<RenderResult> {
   const warnings: LayoutWarning[] = [...note.warnings];
   const htmlPath = `${directory}/note.html`;
   const imagePath = `${directory}/note.png`;
@@ -355,7 +335,6 @@ export async function renderCompiledDocument(
       htmlPath,
       imagePath,
       width,
-      preparePage,
     );
     warnings.push(...screenshot.warnings);
     return {

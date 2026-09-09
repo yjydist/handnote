@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createInkCandidate,
-  measureCompleteInkLine,
-  parseInkJson,
-  renderInkSvg,
-  strokeBounds,
-} from "../src/index.ts";
+import { parseInkJson, renderInkSvg, strokeBounds } from "../src/index.ts";
 
 function input() {
   return [
@@ -29,35 +23,6 @@ function input() {
 }
 
 describe("trajectory source identity and validation", () => {
-  test("complete line metrics transform together with source coordinates and pen width", () => {
-    const source = input();
-    const original = measureCompleteInkLine(
-      parseInkJson(JSON.stringify(source)),
-      [0, 1],
-    );
-    const transformed = measureCompleteInkLine(
-      parseInkJson(
-        JSON.stringify(
-          source.map((stroke) => ({
-            ...stroke,
-            pen_width: stroke.pen_width * 3,
-            points: stroke.points.map((point) => ({
-              ...point,
-              x: point.x * 3 + 7,
-              y: point.y * 3 - 11,
-            })),
-          })),
-        ),
-      ),
-      [0, 1],
-    );
-    expect(transformed.bodyHeight).toBe(original.bodyHeight * 3);
-    expect(transformed.bodyBottom).toBe(original.bodyBottom * 3 - 11);
-    expect(transformed.visibleBounds.width).toBe(
-      original.visibleBounds.width * 3,
-    );
-  });
-
   test("retains original stroke and point ordering with byte-level identity", () => {
     const raw = JSON.stringify(input());
     const document = parseInkJson(raw);
@@ -180,26 +145,5 @@ describe("complete black trajectories and transparent fragments", () => {
     ]) {
       expect(() => renderInkSvg(document, options)).toThrow();
     }
-  });
-
-  test("candidate records are pending review and source identities do not depend on OCR text", () => {
-    const document = parseInkJson(JSON.stringify(input()));
-    const options = { strokeIndices: [0], lineHeight: 32, baseline: 40 };
-    const candidate = createInkCandidate(document, {
-      ...options,
-      text: "候选",
-    });
-    expect(candidate.status).toBe("pending-human-review");
-    expect(candidate.baseline).toBe(22);
-    expect(candidate.lineHeight).toBe(32);
-    expect(candidate.id).toBe(
-      createInkCandidate(document, { ...options, text: "修正" }).id,
-    );
-    expect(() =>
-      createInkCandidate(document, { ...options, text: " " }),
-    ).toThrow();
-    expect(() =>
-      createInkCandidate(document, { ...options, text: "候选", lineHeight: 0 }),
-    ).toThrow();
   });
 });

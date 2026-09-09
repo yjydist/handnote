@@ -26,32 +26,6 @@ export interface Bounds {
   readonly height: number;
 }
 
-export interface InkLineMetrics {
-  readonly status: "available";
-  readonly method: "complete-line-visible-envelope";
-  readonly visibleBounds: Bounds;
-  readonly bodyHeight: number;
-  readonly bodyBottom: number;
-  readonly strokeIndices: readonly number[];
-}
-
-/** The caller supplies the complete source line, independently of target fragments. */
-export function measureCompleteInkLine(
-  document: InkDocument,
-  strokeIndices: readonly number[],
-): InkLineMetrics {
-  const strokes = selectStrokes(document, strokeIndices);
-  const visibleBounds = boundsFor(strokes);
-  return Object.freeze({
-    status: "available",
-    method: "complete-line-visible-envelope",
-    visibleBounds,
-    bodyHeight: visibleBounds.height,
-    bodyBottom: visibleBounds.y + visibleBounds.height,
-    strokeIndices: Object.freeze(strokes.map((stroke) => stroke.index)),
-  });
-}
-
 export interface StrokeReference {
   readonly sourceHash: string;
   readonly strokeIndex: number;
@@ -71,18 +45,6 @@ export interface InkRendering {
   readonly bounds: Bounds;
   readonly transform: InkTransform;
   readonly strokeRefs: readonly StrokeReference[];
-}
-
-export interface InkCandidate {
-  readonly id: string;
-  readonly sourceHash: string;
-  readonly strokeIndices: readonly number[];
-  readonly text: string;
-  readonly bounds: Bounds;
-  readonly lineHeight: number;
-  /** Baseline relative to the top of bounds, in source coordinate units. */
-  readonly baseline: number;
-  readonly status: "pending-human-review";
 }
 
 function record(value: unknown, context: string): Record<string, unknown> {
@@ -275,31 +237,5 @@ export function renderInkSvg(
         }),
       ),
     ),
-  });
-}
-
-export function createInkCandidate(
-  document: InkDocument,
-  options: {
-    text: string;
-    strokeIndices: readonly number[];
-    lineHeight: number;
-    /** Baseline y coordinate in the original trajectory space. */
-    baseline: number;
-  },
-): InkCandidate {
-  if (!options.text.trim()) throw new Error("Candidate text must be nonempty");
-  const strokes = selectStrokes(document, options.strokeIndices);
-  const strokeIndices = Object.freeze(strokes.map((stroke) => stroke.index));
-  const bounds = boundsFor(strokes);
-  return Object.freeze({
-    id: `${document.sourceHash}:${strokeIndices.join(",")}`,
-    sourceHash: document.sourceHash,
-    strokeIndices,
-    text: options.text,
-    bounds,
-    lineHeight: positive(options.lineHeight, "lineHeight"),
-    baseline: finite(options.baseline - bounds.y, "baseline"),
-    status: "pending-human-review",
   });
 }

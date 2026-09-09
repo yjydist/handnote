@@ -20,7 +20,6 @@
     "scripts/**/*.ts",
     "packages/renderer/**/*.ts",
     "packages/ink/**/*.ts",
-    "experiments/ink/*.ts",
     "packages/agent/**/*.ts",
     "apps/handnote/**/*.ts",
     "tests/**/*.ts"
