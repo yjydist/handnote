@@ -87,16 +87,16 @@ export function matchInkSources(
   const blocks = new Map<string, string>();
   const offsets = new Map<string, number>();
   for (const range of document.textRanges) {
-    const previous = blocks.get(range.blockId) ?? "";
+    const previous = blocks.get(range.flowId) ?? "";
     offsets.set(range.rangeId, previous.length);
-    blocks.set(range.blockId, previous + range.text);
+    blocks.set(range.flowId, previous + range.text);
   }
   const unusedSources: { sourceId: string; reason: string }[] = [];
   const proposals: { source: MatchingSource; target: DocumentTarget }[] = [];
   for (const source of sources) {
     const targets = document.textRanges.flatMap((range) =>
       occurrences(range.text, source.text).map((start) => {
-        const block = blocks.get(range.blockId) ?? "";
+        const block = blocks.get(range.flowId) ?? "";
         const at = (offsets.get(range.rangeId) ?? 0) + start;
         return {
           target: {

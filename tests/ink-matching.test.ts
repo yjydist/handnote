@@ -108,3 +108,21 @@ test("does not borrow unique fragments from unrelated source sentences for added
     expect(report.fontRanges.map((range) => range.text)).toEqual([target]);
   }
 });
+
+test("does not invent continuous source context across excluded inline content or a hard break", async () => {
+  for (const separator of ["`代码`", "$x$", "<br>", "![图](image.png)"]) {
+    const document = await prepareDocument(`甲${separator}乙`, {
+      resolveImage: async () => ({
+        bytes: new Uint8Array([1]),
+        mimeType: "image/png",
+      }),
+    });
+    const report = matchInkSources(
+      document,
+      "source",
+      [source(1, "甲", "甲乙")],
+      ["甲乙"],
+    );
+    expect(report.bindings).toEqual([]);
+  }
+});

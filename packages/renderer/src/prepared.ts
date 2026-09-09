@@ -10,6 +10,7 @@ import {
 export interface TextRange {
   readonly rangeId: string;
   readonly blockId: string;
+  readonly flowId: string;
   readonly kind: "heading" | "paragraph" | "list-item";
   readonly text: string;
 }
@@ -70,11 +71,13 @@ interface Candidate {
   path: number[];
   blockPath: number[];
   blockId: string;
+  flowId: string;
   kind: TextRange["kind"];
   pieces: Array<{ value: string; start: number; end: number }>;
 }
 
 interface Flow {
+  id: string;
   hasContent: boolean;
   pending?: { candidate: Candidate; start: number; end: number };
 }
@@ -120,6 +123,8 @@ function collectRanges(tree: Root): {
 } {
   const candidates: Candidate[] = [];
   let generatedBlocks = 0;
+  let generatedFlows = 0;
+  const nextFlowId = () => `flow-${++generatedFlows}`;
 
   const walk = (
     node: Root | RootContent,
@@ -133,6 +138,7 @@ function collectRanges(tree: Root): {
         path,
         blockPath: block.path,
         blockId: block.id,
+        flowId: flow.id,
         kind: block.kind,
         pieces: [],
       };
@@ -157,6 +163,8 @@ function collectRanges(tree: Root): {
       return;
     }
     if (node.type !== "root" && node.type !== "element") return;
+    const parentFlow = flow;
+    let startsBlock = false;
     if (node.type === "element") {
       if (hasClass(node, "sr-only") || node.properties.hidden === true) return;
       if (
@@ -174,9 +182,11 @@ function collectRanges(tree: Root): {
           flushSpace(flow);
           flow.hasContent = true;
         }
+        flow.id = nextFlowId();
         return;
       }
       if (node.tagName === "br") {
+        flow.id = nextFlowId();
         delete flow.pending;
         flow.hasContent = false;
         return;
@@ -202,19 +212,21 @@ function collectRanges(tree: Root): {
               ? "list-item"
               : "paragraph",
         };
-        flow = { hasContent: false };
+        startsBlock = true;
+        flow = { id: nextFlowId(), hasContent: false };
       }
     }
     node.children.forEach((child, index) => {
       walk(child, [...path, index], block, flow, inList);
     });
+    if (startsBlock) parentFlow.id = nextFlowId();
   };
 
   walk(
     tree,
     [],
     { path: [], id: "document", kind: "paragraph" },
-    { hasContent: false },
+    { id: nextFlowId(), hasContent: false },
     false,
   );
   const textRanges: TextRange[] = [];
@@ -229,6 +241,7 @@ function collectRanges(tree: Root): {
       Object.freeze({
         rangeId,
         blockId: candidate.blockId,
+        flowId: candidate.flowId,
         kind: candidate.kind,
         text,
       }),

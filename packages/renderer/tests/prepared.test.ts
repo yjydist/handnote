@@ -10,6 +10,31 @@ import {
 import { clonePreparedDocument } from "../src/prepared.ts";
 
 describe("prepared Markdown documents", () => {
+  test("keeps inline formatting continuous but separates non-text and hard-break flows", async () => {
+    for (const separator of ["`代码`", "$x$", "<br>", "![图](image.png)"]) {
+      const document = await prepareDocument(`甲${separator}乙`, {
+        resolveImage: async () => ({
+          bytes: new Uint8Array([1]),
+          mimeType: "image/png",
+        }),
+      });
+      const first = document.textRanges.find((range) => range.text === "甲");
+      const last = document.textRanges.find((range) => range.text === "乙");
+      expect(first?.flowId).toBeDefined();
+      expect(last?.flowId).toBeDefined();
+      expect(first?.flowId).not.toBe(last?.flowId);
+    }
+    const formatted = await prepareDocument(
+      "甲**乙**[丙](https://example.test)丁",
+    );
+    expect(
+      new Set(formatted.textRanges.map((range) => range.flowId)).size,
+    ).toBe(1);
+    const nested = await prepareDocument("<div>甲<p>乙</p>丙</div>");
+    expect(new Set(nested.textRanges.map((range) => range.flowId)).size).toBe(
+      3,
+    );
+  });
   test("exposes decoded visible text with distinct formatting and block boundaries", async () => {
     const document = await prepareDocument(
       "# 标题\n\n正文 &amp; **加粗**与[链接](https://example.test)。\n\n3. 列表\n4. 重复\n\n重复",
