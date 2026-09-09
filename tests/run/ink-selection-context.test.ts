@@ -154,6 +154,28 @@ test("selection geometry exposes enclosed and crossing strokes per fragment thro
   expect(visible).toMatchObject({ type: "content" });
   const content = (visible as { value: Array<{ type: string; text?: string }> })
     .value;
+  const contextText = content[0]?.text;
+  if (!contextText) throw new Error("Missing model context");
+  const context = JSON.parse(contextText.slice(contextText.indexOf("\n") + 1));
+  expect(context.selectionContext).toEqual({
+    candidateRule: items[0]?.selectionContext.candidateRule,
+    detail: items[0]?.selectionContext.detail,
+  });
+  for (const [index, item] of items.entries()) {
+    expect(context.items[index].selectionContext).toEqual({
+      candidates: item.selectionContext.candidates,
+    });
+    expect(context.items[index].previews).toEqual([
+      { view: index + 1, kind: "actual" },
+    ]);
+    expect(context.items[index].asset).not.toHaveProperty("sourceHash");
+  }
+  expect(contextText).not.toContain(store.directory);
+  expect(
+    contextText.split(
+      "These are geometric candidates, not character assignments",
+    ),
+  ).toHaveLength(2);
   const summary = content
     .filter((part) => part.type === "text")
     .map((part) => part.text)

@@ -250,6 +250,9 @@ test("offline model sees real media and rendered table counts before and after r
       "write → review → revise → review → finalize",
     );
     expect(toolResults).toContain('"type":"image-data"');
+    expect(toolResults).not.toContain("sourceHash");
+    expect(toolResults).not.toContain("coordinatesToPreview");
+    expect(toolResults).not.toContain(store.directory);
   }
   const browser = await chromium.launch({ headless: true });
   try {

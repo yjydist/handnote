@@ -26,6 +26,7 @@ import {
   loadInkLibrary,
   readInkSource,
 } from "../run/ink-assets.ts";
+import { inkModelContext } from "./ink-model-context.ts";
 import { prepareInkPreview, saveInkPreview } from "./ink-preview.ts";
 import { remainingSteps } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
@@ -134,14 +135,17 @@ async function knownAssets(context: ToolContext, ids: readonly string[]) {
   }
 }
 
-function result(items: unknown[], paths: string[]): InkToolResult {
+function result(
+  items: Parameters<typeof inkModelContext>[0],
+  paths: string[],
+): InkToolResult {
   return {
     ok: true,
     paths,
     mimeType: "image/png",
     items,
     status,
-    summary: `${coordinateDescription}\n${JSON.stringify({ status, items })}`,
+    summary: `${coordinateDescription}\n${JSON.stringify({ status, ...inkModelContext(items) })}`,
   };
 }
 

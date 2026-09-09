@@ -60,12 +60,12 @@ const sourceBytes = Buffer.from(
 );
 const execution = { step: 1, remainingSteps: 10 };
 
-async function setup() {
+async function setup(inkSourceBytes = sourceBytes) {
   const directory = await mkdtemp(`${tmpdir()}/handnote-ink-tools-`);
   directories.push(directory);
   const store = await RunStore.create(directory, {
     inputExtension: ".png",
-    inkSourceBytes: sourceBytes,
+    inkSourceBytes,
   });
   await store.copyInput(store.path("input/redraw.png"));
   const tools = createInkHandlers({
@@ -89,6 +89,9 @@ function assetItems(output: InkToolResult) {
     preview: { kind: string; path: string; width: number; height: number };
     status: string;
   }>;
+}
+function modelSummary(output: InkToolResult) {
+  return JSON.parse(output.summary.slice(output.summary.indexOf("\n") + 1));
 }
 async function assetFiles(store: RunStore) {
   return (
@@ -174,6 +177,51 @@ test.each([7, 0])(
 );
 
 describe("ink tools", () => {
+  test("model geometry retains full source precision while evidence retains both coordinate systems", async () => {
+    const strokes = JSON.parse(sourceBytes.toString());
+    strokes[0].points[0].x = -10.123456789012344;
+    strokes[0].points[1].y = 0.987654321098765;
+    const { store, tools } = await setup(Buffer.from(JSON.stringify(strokes)));
+    const output = success(
+      await tools.inspect_ink(
+        {
+          views: [
+            { kind: "region", region: { x: 0, y: 0, width: 1, height: 1 } },
+          ],
+        },
+        execution,
+      ),
+    );
+    const full = output.items[0] as {
+      candidates: Array<{
+        strokeIndex: number;
+        sourceBounds: { x: number; y: number; width: number; height: number };
+        redrawBounds: unknown;
+        crossesBoundary: boolean;
+      }>;
+      strokeIndices: number[];
+    };
+    const compact = modelSummary(output).items[0];
+    expect(
+      compact.candidates.map(
+        (candidate: { sourceBounds: unknown }) => candidate.sourceBounds,
+      ),
+    ).toEqual(full.candidates.map((candidate) => candidate.sourceBounds));
+    expect(compact.candidates[0].sourceBounds.x).toBe(-11.123456789012344);
+    expect(full.strokeIndices).toEqual([0, 1, 2, 3]);
+    expect(full.candidates[0]).toHaveProperty("redrawBounds");
+    expect(compact.candidates[0]).not.toHaveProperty("redrawBounds");
+    expect(compact).not.toHaveProperty("strokeIndices");
+    expect(output.summary.length).toBeLessThan(
+      JSON.stringify(output.items).length,
+    );
+    expect(
+      readSession(store.path("session/events.jsonl")).events.find(
+        (event) => event.type === "tool.inspect_ink.completed",
+      )?.data,
+    ).toMatchObject({ output: { items: output.items } });
+  });
+
   test("page reports exact coordinates and region returns complete numbered candidates", async () => {
     const { store, tools } = await setup();
     const output = success(
@@ -201,6 +249,7 @@ describe("ink tools", () => {
       originalRelation: "unknown",
     });
     const region = output.items[1] as {
+      redrawBounds: unknown;
       strokeIndices: number[];
       candidates: Array<{
         strokeIndex: number;
@@ -237,10 +286,42 @@ describe("ink tools", () => {
       expect(metadata.format).toBe("png");
       expect((await sharp(path).stats()).channels[0]?.min).toBeLessThan(255);
     }
-    const summary = JSON.parse(
-      output.summary.slice(output.summary.indexOf("\n") + 1),
-    );
-    expect(summary.items).toEqual(output.items);
+    const summary = modelSummary(output);
+    expect(summary.status).toBe("pending-human-review");
+    expect(summary.items[0]).toMatchObject({
+      kind: "page",
+      strokeCount: 4,
+      sourceBounds: { x: -11, y: -21, width: 112.5, height: 87.5 },
+      pointsToRedraw: { scale: 1, translateX: 11, translateY: 21 },
+      originalRelation: "unknown",
+      previews: [{ view: 1, kind: "actual" }],
+    });
+    expect(summary.items[1]).toEqual({
+      kind: "region",
+      region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+      redrawBounds: region.redrawBounds,
+      pointsToRedraw: { scale: 1, translateX: 11, translateY: 21 },
+      candidateRule:
+        "complete stroke bounds intersect the requested redraw region",
+      candidates: region.candidates.map(
+        ({ strokeIndex, sourceBounds, crossesBoundary }) => ({
+          strokeIndex,
+          sourceBounds,
+          crossesBoundary,
+        }),
+      ),
+      previews: [
+        { view: 2, kind: "actual" },
+        { view: 3, kind: "stroke_indices" },
+      ],
+    });
+    expect(output.summary).not.toContain(store.directory);
+    expect(summary.items[0]).not.toHaveProperty("sourceHash");
+    expect(
+      readSession(store.path("session/events.jsonl")).events.find(
+        (event) => event.type === "tool.inspect_ink.completed",
+      )?.data,
+    ).toMatchObject({ output: { items: output.items } });
     expect(output.summary).toContain("original photograph is unknown");
     expect(await assetFiles(store)).toEqual([]);
   });
@@ -267,7 +348,23 @@ describe("ink tools", () => {
     expect((await loadInkAsset(store, first.asset.id)).svg).toBe(
       renderInkAsset(document, expected),
     );
-    expect(selected.summary).toContain(JSON.stringify(first.asset));
+    expect(modelSummary(selected).items[0]).toMatchObject({
+      asset: {
+        id: expected.id,
+        kind: expected.kind,
+        width: expected.width,
+        height: expected.height,
+        presentation: expected.presentation,
+        strokeIndices: expected.strokeIndices,
+        sourceBounds: expected.sourceBounds,
+      },
+      relativePath: first.relativePath,
+      previews: [{ view: 1, kind: "actual" }],
+    });
+    expect(modelSummary(selected).items[0].asset).not.toHaveProperty("version");
+    expect(selected.summary).not.toContain(first.asset.sourceHash);
+    expect(selected.summary).not.toContain(first.preview.path);
+    expect(modelSummary(selected).items[0]).not.toHaveProperty("markdown");
     expect(await sharp(first.preview.path).metadata()).toMatchObject({
       format: "png",
       width: first.preview.width,
@@ -354,7 +451,23 @@ describe("ink tools", () => {
     });
     const loaded = await loadInkAsset(store, composed.asset.id);
     expect(loaded.artifacts).toHaveLength(9);
-    expect(output.summary).toContain(JSON.stringify(composed.asset));
+    expect(modelSummary(output).items[0]).toMatchObject({
+      asset: {
+        id: composed.asset.id,
+        parts,
+        strokeIndices: [0, 1],
+        presentation: composed.asset.presentation,
+      },
+      relativePath: composed.relativePath,
+      previews: [{ view: 1, kind: "actual" }],
+    });
+    if (composed.asset.kind !== "composition")
+      throw new Error("Expected composition");
+    expect(modelSummary(output).items[0].asset.bounds).toEqual(
+      composed.asset.bounds,
+    );
+    expect(output.summary).not.toContain(composed.asset.sourceHash);
+    expect(output.summary).not.toContain(composed.preview.path);
     expect(
       (await sharp(composed.preview.path).stats()).channels[0]?.min,
     ).toBeLessThan(255);
