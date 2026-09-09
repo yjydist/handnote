@@ -8,6 +8,7 @@ import {
 import { dirname, relative, resolve } from "node:path";
 import type { RevisionAudit } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
+import type { InkUsage } from "./markdown.ts";
 import {
   type RedactionContext,
   type RedactionOptions,
@@ -30,7 +31,11 @@ type RevisionEvent = {
   imageSha256: string;
   dependenciesSha256?: string;
 } & (
-  | { type: "document.revision.committed"; audit: RevisionAudit }
+  | {
+      type: "document.revision.committed";
+      audit: RevisionAudit;
+      inkUsage?: InkUsage;
+    }
   | { type: "render.reviewed" | "note.finalized"; step: number }
 );
 
@@ -138,7 +143,10 @@ export class SessionRecorder {
         ? { dependenciesSha256: event.dependenciesSha256 }
         : {}),
       ...(event.type === "document.revision.committed"
-        ? { audit: this.sanitize(event.audit) }
+        ? {
+            audit: this.sanitize(event.audit),
+            ...(event.inkUsage ? { inkUsage: event.inkUsage } : {}),
+          }
         : { step: event.step }),
     });
   }

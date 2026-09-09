@@ -64,10 +64,18 @@ async function readFigureResource(
   }
 }
 
+export interface InkUsage {
+  sourceHash: string;
+  assetIds: string[];
+  usedStrokeIndices: number[];
+  unusedStrokeIndices: number[];
+  repeatedStrokeIndices: number[];
+}
+
 export async function compileNoteMarkdown(
   markdown: string,
   options: { runDirectory: string; manifest?: RunManifest },
-): Promise<CompiledNote & { assets: Artifact[] }> {
+): Promise<CompiledNote & { assets: Artifact[]; inkUsage?: InkUsage }> {
   const assets = new Map<string, Artifact>();
   const inkRun =
     options.manifest?.formatVersion === 2
@@ -75,8 +83,18 @@ export async function compileNoteMarkdown(
       : undefined;
   const usedStrokes = new Set<number>();
   const dependencies: Artifact[] = [];
+  let inkUsage: InkUsage | undefined;
   if (inkRun) {
     const source = await readInkSource(inkRun);
+    inkUsage = {
+      sourceHash: source.document.sourceHash,
+      assetIds: [],
+      usedStrokeIndices: [],
+      unusedStrokeIndices: source.document.strokes.map(
+        (stroke) => stroke.index,
+      ),
+      repeatedStrokeIndices: [],
+    };
     dependencies.push(
       source.metadata.points,
       source.metadata.redraw.svg,
@@ -100,6 +118,7 @@ export async function compileNoteMarkdown(
           usedStrokes.add(index);
         }
         inkCount++;
+        inkUsage?.assetIds.push(loaded.asset.id);
         dependencies.push(...loaded.artifacts);
         return {
           bytes: Buffer.from(loaded.svg),
@@ -122,8 +141,15 @@ export async function compileNoteMarkdown(
       message: "An ink note must include at least one source ink asset",
       blocking: true,
     });
+  if (inkUsage) {
+    inkUsage.usedStrokeIndices = [...usedStrokes].sort((a, b) => a - b);
+    inkUsage.unusedStrokeIndices = inkUsage.unusedStrokeIndices.filter(
+      (index) => !usedStrokes.has(index),
+    );
+  }
   return {
     ...note,
     assets: inkDependencies([...assets.values(), ...dependencies]),
+    ...(inkUsage ? { inkUsage } : {}),
   };
 }

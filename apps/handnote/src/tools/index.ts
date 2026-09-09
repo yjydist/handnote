@@ -1,6 +1,7 @@
 import type { HandnoteToolHandlers } from "@handnote/agent";
 import { createCaptureFigureHandler } from "./capture-figure.ts";
 import { createFinalizeNoteHandler } from "./finalize-note.ts";
+import { createInkHandlers } from "./ink.ts";
 import { createInspectSourceHandler } from "./inspect-source.ts";
 import { createReadNoteHandler } from "./read-note.ts";
 import { createReviewRenderHandler } from "./review-render.ts";
@@ -14,6 +15,9 @@ export function createHandnoteHandlers(
   context: ToolContext,
 ): HandnoteToolHandlers {
   return {
+    ...(context.store.manifest.formatVersion === 2
+      ? { ink: createInkHandlers(context) }
+      : {}),
     inspect_source: createInspectSourceHandler(context),
     capture_figure: createCaptureFigureHandler(context),
     read_note: createReadNoteHandler(context),

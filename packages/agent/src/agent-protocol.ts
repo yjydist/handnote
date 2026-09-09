@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InkToolHandlers } from "./ink-protocol.ts";
 
 export const regionSchema = z
   .object({
@@ -78,6 +79,39 @@ export const noteRevisionOutputSchema = z.union([
   toolErrorSchema,
 ]);
 
+export const inkAuditSchema = z
+  .object({
+    status: z.literal("pending-human-review").default("pending-human-review"),
+    omissions: z
+      .array(
+        z
+          .object({
+            strokeIndices: z.array(z.int().nonnegative()).min(1),
+            reason: z.string().min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+    electronicText: z
+      .array(
+        z
+          .object({ text: z.string().min(1), reason: z.string().min(1) })
+          .strict(),
+      )
+      .default([]),
+    uncertainties: z
+      .array(
+        z
+          .object({
+            strokeIndices: z.array(z.int().nonnegative()).min(1),
+            description: z.string().min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+
 export const noteDraftInputSchema = z
   .object({
     markdown: z.string().min(1),
@@ -85,6 +119,7 @@ export const noteDraftInputSchema = z
       .object({
         corrections: z.array(z.unknown()).default([]),
         uncertainties: z.array(z.unknown()).default([]),
+        ink: inkAuditSchema.optional(),
       })
       .strict()
       .default({ corrections: [], uncertainties: [] }),
@@ -143,6 +178,8 @@ export const reviewRenderOutputSchema = z.union([
     path: z.string(),
     mimeType: z.literal("image/png"),
     warnings: z.array(z.unknown()),
+    paths: z.array(z.string()).optional(),
+    reviewed: z.boolean().optional(),
     structure: z.record(z.string(), z.number()),
     summary: z.string(),
   }),
@@ -169,6 +206,7 @@ export interface ToolExecutionContext {
 export interface ModelMediaResult {
   ok: boolean;
   path?: string | undefined;
+  paths?: string[] | undefined;
   mimeType?: string | undefined;
   summary?: string | undefined;
 }
@@ -176,8 +214,12 @@ export interface ModelMediaResult {
 export type MediaToolName =
   | "inspect_source"
   | "review_render"
-  | "capture_figure";
+  | "capture_figure"
+  | "inspect_ink"
+  | "select_ink"
+  | "compose_ink";
 export interface PreparedPreview {
+  label?: string;
   data: string;
   mediaType: string;
   width: number;
@@ -193,6 +235,7 @@ export type PreparedToolMedia =
     };
 
 export interface HandnoteToolHandlers {
+  ink?: InkToolHandlers;
   inspect_source(
     input: InspectRequest,
     context: ToolExecutionContext,

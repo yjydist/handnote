@@ -5,6 +5,7 @@ import type { AgentDiagnosticSink, ModelEventSink } from "./agent-events.ts";
 import { AgentErrorLogger } from "./agent-logger.ts";
 import type { HandnoteToolHandlers } from "./agent-protocol.ts";
 import { createAgentTools } from "./agent-tools.ts";
+import { inkPrompt } from "./ink-prompt.ts";
 import { classifyProviderError, createModel } from "./provider/index.ts";
 import type { ModelConfig } from "./provider/types.ts";
 import { RunState } from "./state.ts";
@@ -35,7 +36,8 @@ export async function runAgent(options: {
   const agent = new Agent({
     id: "handnote-agent",
     name: "Handnote Agent",
-    instructions: options.config.promptText,
+    instructions:
+      options.config.promptText + (options.handlers.ink ? inkPrompt : ""),
     model:
       options.model ?? createModel({ config: options.config.model, state }),
     tools: createAgentTools({
@@ -76,7 +78,9 @@ export async function runAgent(options: {
           content: [
             {
               type: "text",
-              text: "Digitize every meaningful note item from this single source image into a faithful electronic note. Follow the configured tool protocol; do not summarize or describe the page, and finalize only after a later-step source-to-render review.",
+              text: options.handlers.ink
+                ? "Rearrange this entire note using its complete original ink trajectories. Start with inspect_ink and select/combine the original handwriting yourself. Preserve every meaningful item and visual relationship; use handwriting as the main content, then review all output widths and finalize. All judgments remain pending-human-review."
+                : "Digitize every meaningful note item from this single source image into a faithful electronic note. Follow the configured tool protocol; do not summarize or describe the page, and finalize only after a later-step source-to-render review.",
             },
             {
               type: "image",

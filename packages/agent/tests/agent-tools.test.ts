@@ -193,6 +193,9 @@ test("the agent formats prepared previews and failure text for the model", async
 
 test("tool schemas reject out-of-bounds crops and unknown draft fields", async () => {
   const { tools } = setup({});
+  expect("inspect_ink" in tools).toBe(false);
+  expect("select_ink" in tools).toBe(false);
+  expect("compose_ink" in tools).toBe(false);
   expect(tools.inspect_source.description).toContain(
     "a region may override either",
   );

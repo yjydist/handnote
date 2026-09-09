@@ -1,4 +1,4 @@
-import { regionSchema } from "@handnote/agent";
+import { inkAuditSchema, regionSchema } from "@handnote/agent";
 import { z } from "zod";
 
 export { type Region, regionSchema } from "@handnote/agent";
@@ -45,6 +45,7 @@ export const revisionAuditSchema = z
   .object({
     corrections: z.array(correctionAuditSchema).default([]),
     uncertainties: z.array(uncertaintyAuditSchema).default([]),
+    ink: inkAuditSchema.optional(),
   })
   .strict()
   .superRefine((audit, ctx) => {

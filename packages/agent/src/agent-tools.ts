@@ -15,6 +15,12 @@ import {
   reviewRenderOutputSchema,
   type ToolExecutionContext,
 } from "./agent-protocol.ts";
+import {
+  composeInkInputSchema,
+  inkToolOutputSchema,
+  inspectInkInputSchema,
+  selectInkInputSchema,
+} from "./ink-protocol.ts";
 
 export function createAgentTools(options: {
   handlers: HandnoteToolHandlers;
@@ -47,7 +53,7 @@ export function createAgentTools(options: {
           ...media.previews.flatMap((preview, index) => [
             {
               type: "text" as const,
-              text: `Preview ${index + 1}/${media.previews.length} ${preview.width}×${preview.height}`,
+              text: `Preview ${index + 1}/${media.previews.length} ${preview.width}×${preview.height}${preview.label ? ` (${preview.label})` : ""}`,
             },
             {
               type: "image-data" as const,
@@ -58,7 +64,43 @@ export function createAgentTools(options: {
         ],
       };
     });
+  const ink = options.handlers.ink;
+  const inkTools = ink
+    ? {
+        inspect_ink: createTool({
+          id: "inspect_ink",
+          description:
+            "View original trajectories, never OCR. Batch 1–8 views: {kind:'page'}, {kind:'region',region:{x,y,width,height}} in normalized REDRAW coordinates, or {kind:'asset',assetId}. Returns actual numbered previews, complete stroke IDs and bounds. Original-image mapping is unknown: do not transfer image coordinates by size ratios. Inspect the page, then batch regions to identify all meaningful strokes before selection.",
+          inputSchema: inspectInkInputSchema,
+          outputSchema: inkToolOutputSchema,
+          execute: (input) =>
+            execute(() => ink.inspect_ink(input, executionContext())),
+          toModelOutput: (output) => modelMediaOutput("inspect_ink", output),
+        }),
+        select_ink: createTool({
+          id: "select_ink",
+          description:
+            "Batch 1–32 selections of complete original strokeIndices with presentation {kind:'text'|'diagram',referenceHeight,transcription?,description?}. referenceHeight is a representative handwritten CHARACTER body height in source coordinate units, not the bounding height of a paragraph or diagram. Choose every stroke belonging to the content, including dots and accents. Returns immutable asset IDs, exact Markdown paths, geometry and previews. Split long text by reselecting complete strokes into smaller fragments; never cut connected strokes. No points or SVG input is accepted.",
+          inputSchema: selectInkInputSchema,
+          outputSchema: inkToolOutputSchema,
+          execute: (input) =>
+            execute(() => ink.select_ink(input, executionContext())),
+          toModelOutput: (output) => modelMediaOutput("select_ink", output),
+        }),
+        compose_ink: createTool({
+          id: "compose_ink",
+          description:
+            "Batch 1–32 compositions of EXISTING same-page assets. Each part is {assetId,rotation,scale,x,y}: clockwise degrees about the asset's top-left local origin, then uniform scale, then translation in composition coordinates (y down). Scale and cumulative scale must stay 0.01–100. No duplicate source strokes within a composition. Supply presentation with representative character referenceHeight in resulting coordinates. One part rotates/rescales an asset; multiple parts arrange it. New ID does not change old assets or notes: use revise_note and review again. Inspect returned previews for omissions, crossings and wrong relationships.",
+          inputSchema: composeInkInputSchema,
+          outputSchema: inkToolOutputSchema,
+          execute: (input) =>
+            execute(() => ink.compose_ink(input, executionContext())),
+          toModelOutput: (output) => modelMediaOutput("compose_ink", output),
+        }),
+      }
+    : {};
   return {
+    ...inkTools,
     inspect_source: createTool({
       id: "inspect_source",
       description: `Inspect one to eight normalized regions from the source image. Input: { regions: [{ x, y, width, height, scale?, enhancement? }], scale?, enhancement? }. Top-level scale/enhancement are batch defaults; a region may override either for its own crop. Regions crossing the right or bottom edge are clipped to the image. Multiple regions return a numbered contact sheet. At most ${options.maxInspectCalls} unique inspection calls are allowed; batch regions and then write the note.`,

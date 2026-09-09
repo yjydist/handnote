@@ -411,6 +411,28 @@ export class RunStore {
         runDirectory: this.directory,
         manifest: this.manifest,
       });
+      if (parsed.audit.ink && note.inkUsage) {
+        const all = new Set([
+          ...note.inkUsage.usedStrokeIndices,
+          ...note.inkUsage.unusedStrokeIndices,
+        ]);
+        const unused = new Set(note.inkUsage.unusedStrokeIndices);
+        for (const item of [
+          ...parsed.audit.ink.omissions,
+          ...parsed.audit.ink.uncertainties,
+        ])
+          if (item.strokeIndices.some((index) => !all.has(index)))
+            throw new NoteStateError(
+              "invalid_ink_audit",
+              "Ink audit references a nonexistent source stroke",
+            );
+        for (const item of parsed.audit.ink.omissions)
+          if (item.strokeIndices.some((index) => !unused.has(index)))
+            throw new NoteStateError(
+              "invalid_ink_audit",
+              "An omitted stroke is still used by this revision",
+            );
+      }
       const number = manifest.revisions.length + 1;
       const parent = "intermediate/revisions";
       const name = String(number).padStart(4, "0");
@@ -453,6 +475,7 @@ export class RunStore {
           imageSha256: image.sha256,
           ...dependencies,
           audit: parsed.audit,
+          ...(note.inkUsage ? { inkUsage: note.inkUsage } : {}),
         });
         const revision: StoredRevision = {
           number,
@@ -506,6 +529,15 @@ export class RunStore {
           "not_ready",
           "Review must occur in a later model step than rendering",
         );
+      if (manifest.formatVersion === 2 && manifest.reviewedRevision) {
+        delete manifest.reviewedRevision;
+        this.recorder.record("render.review.invalidated", {
+          revision: revision.number,
+          step,
+          reason: "A new ink review must pass before finalization",
+        });
+        await this.persist(manifest);
+      }
       await prepare(revision);
       await this.readRevision(revision.number);
       const event = this.recorder.recordRevision({

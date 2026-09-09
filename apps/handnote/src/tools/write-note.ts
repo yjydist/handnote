@@ -4,6 +4,7 @@ import {
   toolError,
 } from "@handnote/agent";
 import { z } from "zod";
+import { revisionAuditSchema } from "../document.ts";
 import { MarkdownValidationError } from "../markdown.ts";
 import { NoteStateError } from "../store.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";
@@ -16,6 +17,14 @@ export async function commitNoteDraft(
   kind: "write" | "revise",
 ): Promise<NoteToolResult> {
   try {
+    if (
+      context.store.manifest.formatVersion === 2 &&
+      !revisionAuditSchema.parse(draft.audit).ink
+    )
+      return toolError(
+        "invalid_ink_audit",
+        "Trajectory-backed revisions require audit.ink with omissions, electronicText, uncertainties and pending-human-review status (empty lists are allowed).",
+      );
     const revision = await context.store.commit(draft, {
       kind,
       step: execution.step,

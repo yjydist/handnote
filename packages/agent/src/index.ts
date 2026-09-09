@@ -16,6 +16,7 @@ export {
   captureFigureInputSchema,
   type HandnoteToolHandlers,
   type InspectRequest,
+  inkAuditSchema,
   inspectInputSchema,
   type NoteToolResult,
   type PreparedPreview,
@@ -25,6 +26,18 @@ export {
   type ToolExecutionContext,
   toolError,
 } from "./agent-protocol.ts";
+export {
+  type ComposeInkRequest,
+  composeInkInputSchema,
+  type InkToolHandlers,
+  type InkToolResult,
+  type InspectInkRequest,
+  inkPresentationSchema,
+  inkToolOutputSchema,
+  inspectInkInputSchema,
+  type SelectInkRequest,
+  selectInkInputSchema,
+} from "./ink-protocol.ts";
 export {
   accountModelAttempt,
   accountModelStep,
