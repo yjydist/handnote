@@ -7,6 +7,7 @@ import {
   inspectInkInputSchema,
   type SelectInkRequest,
   selectInkInputSchema,
+  type ToolExecutionContext,
   toolError,
 } from "../agent/index.ts";
 import {
@@ -26,6 +27,7 @@ import {
   readInkSource,
 } from "../run/ink-assets.ts";
 import { prepareInkPreview, saveInkPreview } from "./ink-preview.ts";
+import { remainingSteps } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
 class InkRequestError extends Error {
@@ -147,10 +149,13 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
   const execute = async (
     name: keyof InkToolHandlers,
     input: unknown,
+    execution: ToolExecutionContext,
     operation: () => Promise<InkToolResult>,
   ): Promise<InkToolResult> => {
+    const budget = `${remainingSteps(execution)}. Reserve steps for write → review → revise → review → finalize.`;
     try {
-      const output = await operation();
+      const result = await operation();
+      const output = { ...result, summary: `${budget} ${result.summary}` };
       context.recorder.record(`tool.${name}.completed`, { input, output });
       return output;
     } catch (error) {
@@ -164,7 +169,7 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
               : "invalid_ink_request",
             message,
           ),
-          summary: message,
+          summary: `${budget} ${message}`,
         };
         context.recorder.record(`tool.${name}.rejected`, { input, output });
         return output;
@@ -228,8 +233,8 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
     return result(items, paths);
   };
   return {
-    inspect_ink: (input) =>
-      execute("inspect_ink", input, async () => {
+    inspect_ink: (input, execution) =>
+      execute("inspect_ink", input, execution, async () => {
         const parsed = inspectInkInputSchema.parse(input);
         const { document, metadata } = await readInkSource(context.store);
         const source = renderInkSvg(document, { background: "white" });
@@ -373,8 +378,8 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
         }
         return result(items, paths);
       }),
-    select_ink: (input) =>
-      execute("select_ink", input, async () => {
+    select_ink: (input, execution) =>
+      execute("select_ink", input, execution, async () => {
         const parsed = selectInkInputSchema.parse(input);
         const { document } = await readInkSource(context.store);
         const assets = geometry(() =>
@@ -405,8 +410,8 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
           assets.map((asset) => selectionContext(asset, strokes)),
         );
       }),
-    compose_ink: (input) =>
-      execute("compose_ink", input, async () => {
+    compose_ink: (input, execution) =>
+      execute("compose_ink", input, execution, async () => {
         const parsed = composeInkInputSchema.parse(input);
         const ids = parsed.compositions.flatMap((composition) =>
           composition.parts.map((part) => part.assetId),

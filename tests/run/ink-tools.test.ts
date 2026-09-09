@@ -106,6 +106,73 @@ afterEach(async () => {
   );
 });
 
+test.each([7, 0])(
+  "all ink tools report the execution budget of %s remaining steps",
+  async (remaining) => {
+    const { tools } = await setup();
+    const execution = { step: 12, remainingSteps: remaining };
+    const inspected = await tools.inspect_ink(
+      { views: [{ kind: "page" }] },
+      execution,
+    );
+    const selected = await tools.select_ink(
+      { selections: [{ strokeIndices: [0], presentation }] },
+      execution,
+    );
+    const asset = assetItems(selected)[0]?.asset;
+    if (!asset) throw new Error("Missing selected asset");
+    const composed = await tools.compose_ink(
+      {
+        compositions: [
+          {
+            parts: [{ assetId: asset.id, rotation: 0, scale: 1, x: 0, y: 0 }],
+            presentation,
+          },
+        ],
+      },
+      execution,
+    );
+    const rejected = [
+      await tools.inspect_ink(
+        { views: [{ kind: "asset", assetId: "f".repeat(64) }] },
+        execution,
+      ),
+      await tools.select_ink(
+        { selections: [{ strokeIndices: [999], presentation }] },
+        execution,
+      ),
+      await tools.compose_ink(
+        {
+          compositions: [
+            {
+              parts: [
+                { assetId: "f".repeat(64), rotation: 0, scale: 1, x: 0, y: 0 },
+              ],
+              presentation,
+            },
+          ],
+        },
+        execution,
+      ),
+    ];
+    for (const output of [inspected, selected, composed])
+      expect(output.ok).toBe(true);
+    for (const output of rejected) {
+      expect(output.ok).toBe(false);
+      if (output.ok) throw new Error("Expected repairable error");
+      expect(output.error.repairable).toBe(true);
+    }
+    for (const output of [inspected, selected, composed, ...rejected]) {
+      expect(output.summary).toContain(
+        `${remaining} model step(s) remain after this one`,
+      );
+      expect(output.summary).toContain(
+        "write → review → revise → review → finalize",
+      );
+    }
+  },
+);
+
 describe("ink tools", () => {
   test("page reports exact coordinates and region returns complete numbered candidates", async () => {
     const { store, tools } = await setup();

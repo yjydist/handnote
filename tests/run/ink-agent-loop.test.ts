@@ -237,6 +237,20 @@ test("offline model sees real media and rendered table counts before and after r
     onDiagnostic: () => undefined,
   });
   expect(result.steps).toBe(8);
+  for (const step of [1, 2, 3]) {
+    const toolResults = JSON.stringify(
+      model.doGenerateCalls[step]?.prompt.filter(
+        (message) => message.role === "tool",
+      ),
+    );
+    expect(toolResults).toContain(
+      `${10 - step} model step(s) remain after this one`,
+    );
+    expect(toolResults).toContain(
+      "write → review → revise → review → finalize",
+    );
+    expect(toolResults).toContain('"type":"image-data"');
+  }
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();

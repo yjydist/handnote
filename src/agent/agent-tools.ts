@@ -66,7 +66,7 @@ export function createAgentTools(options: {
           value:
             output.message +
             (purpose.endsWith("_ink")
-              ? "\nUse a smaller batch and valid JSON."
+              ? `\nUse a smaller batch and valid JSON. ${executionContext().remainingSteps} model step(s) remain after this one. Reserve steps for write → review → revise → review → finalize.`
               : ""),
         };
       }

@@ -254,23 +254,31 @@ test.each([
     const tool = tools[name];
     if (!tool?.execute || !tool.toModelOutput)
       throw new Error("Missing media tool");
-    const rejected = await tool.execute(
-      {} as Parameters<typeof tool.execute>[0],
-      {} as Parameters<typeof tool.execute>[1],
-    );
-    expect(rejected).toMatchObject({ error: true });
-    const message = (rejected as { message: string }).message;
-    expect(message).toContain(`Tool input validation failed for ${name}`);
-    const output = await tool.toModelOutput(
-      rejected as Parameters<typeof tool.toModelOutput>[0],
-    );
-    expect(output).toMatchObject({ type: "text" });
-    const text = (output as { value: string }).value;
-    expect(text).toContain(message);
-    if (name.endsWith("_ink"))
-      expect(text).toContain("Use a smaller batch and valid JSON");
-    expect(prepared).toBe(false);
-    expect(state.failures).toEqual([]);
+    for (const step of [2, 8]) {
+      state.step = step;
+      const rejected = await tool.execute(
+        {} as Parameters<typeof tool.execute>[0],
+        {} as Parameters<typeof tool.execute>[1],
+      );
+      expect(rejected).toMatchObject({ error: true });
+      const message = (rejected as { message: string }).message;
+      expect(message).toContain(`Tool input validation failed for ${name}`);
+      const output = await tool.toModelOutput(
+        rejected as Parameters<typeof tool.toModelOutput>[0],
+      );
+      expect(output).toMatchObject({ type: "text" });
+      const text = (output as { value: string }).value;
+      expect(text).toContain(message);
+      if (name.endsWith("_ink")) {
+        expect(text).toContain("Use a smaller batch and valid JSON");
+        expect(text).toContain(
+          `${8 - step} model step(s) remain after this one`,
+        );
+        expect(text).toContain("write → review → revise → review → finalize");
+      }
+      expect(prepared).toBe(false);
+      expect(state.failures).toEqual([]);
+    }
   },
 );
 
@@ -333,9 +341,14 @@ test("an offline model sees the malformed ink call error and retries valid JSON"
         );
         expect(feedback).toContain("selections: Invalid input: expected array");
         expect(feedback).toContain("Use a smaller batch and valid JSON");
+        expect(feedback).toContain("3 model step(s) remain after this one");
       }
-      if (calls === 3)
+      if (calls === 3) {
         expect(JSON.stringify(prompt)).toContain("Selected complete stroke 0");
+        expect(JSON.stringify(prompt)).toContain(
+          "3 model step(s) remain after this one",
+        );
+      }
       return {
         content: [
           {
