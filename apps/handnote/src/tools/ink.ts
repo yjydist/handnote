@@ -72,6 +72,35 @@ function intersects(a: Bounds, b: Bounds) {
   );
 }
 
+function selectionContext(
+  asset: InkAsset,
+  strokes: readonly { strokeIndex: number; sourceBounds: Bounds }[],
+) {
+  const selected = new Set(asset.strokeIndices);
+  const bounds = asset.sourceBounds;
+  return {
+    candidateRule:
+      "unselected complete stroke bounds intersect this fragment's source bounds",
+    detail:
+      "These are geometric candidates, not character assignments; compare the actual previews for complete characters and relationships. Keep the selection or reselect complete strokes. Candidates are not added automatically and do not block selection.",
+    candidates: strokes.flatMap(({ strokeIndex, sourceBounds }) => {
+      if (selected.has(strokeIndex) || !intersects(sourceBounds, bounds))
+        return [];
+      return [
+        {
+          strokeIndex,
+          sourceBounds,
+          crossesBoundary:
+            sourceBounds.x < bounds.x ||
+            sourceBounds.y < bounds.y ||
+            sourceBounds.x + sourceBounds.width > bounds.x + bounds.width ||
+            sourceBounds.y + sourceBounds.height > bounds.y + bounds.height,
+        },
+      ];
+    }),
+  };
+}
+
 async function knownAssets(context: ToolContext, ids: readonly string[]) {
   const manifest = context.store.manifest;
   for (const id of new Set(ids)) {
@@ -171,6 +200,7 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
   const persist = async (
     assets: readonly InkAsset[],
     previews: Awaited<ReturnType<typeof prepareInkPreview>>[],
+    selectionContexts?: readonly ReturnType<typeof selectionContext>[],
   ) => {
     const items = [];
     const paths: string[] = [];
@@ -185,6 +215,9 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
         relativePath: saved.relativePath,
         markdown: `![](${saved.relativePath})`,
         preview: actual,
+        ...(selectionContexts
+          ? { selectionContext: selectionContexts[index] }
+          : {}),
         status,
       });
     }
@@ -348,6 +381,10 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
             }),
           ),
         );
+        const strokes = document.strokes.map((stroke) => ({
+          strokeIndex: stroke.index,
+          sourceBounds: strokeBounds(stroke),
+        }));
         const previews = [];
         for (const asset of assets)
           previews.push(
@@ -358,7 +395,11 @@ export function createInkHandlers(context: ToolContext): InkToolHandlers {
               height: asset.height,
             }),
           );
-        return persist(assets, previews);
+        return persist(
+          assets,
+          previews,
+          assets.map((asset) => selectionContext(asset, strokes)),
+        );
       }),
     compose_ink: (input) =>
       execute("compose_ink", input, async () => {
