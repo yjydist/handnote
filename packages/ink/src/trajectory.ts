@@ -216,6 +216,17 @@ function boundsFor(strokes: readonly InkStroke[]): Bounds {
   return checkedBounds(left, top, right, bottom);
 }
 
+export function strokeSvg(stroke: InkStroke): string {
+  const point = stroke.points[0];
+  if (!point) throw new Error("Cannot render empty stroke");
+  const isDot = stroke.points.every(
+    (other) => other.x === point.x && other.y === point.y,
+  );
+  if (isDot)
+    return `<circle cx="${point.x}" cy="${point.y}" r="${stroke.penWidth / 2}" fill="black"/>`;
+  return `<polyline points="${stroke.points.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="black" stroke-width="${stroke.penWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
 export function renderInkSvg(
   document: InkDocument,
   options: {
@@ -244,16 +255,7 @@ export function renderInkSvg(
     translateX: finite(padding - bounds.x * scale, "translateX"),
     translateY: finite(padding - bounds.y * scale, "translateY"),
   });
-  const paths = strokes.map((stroke) => {
-    const point = stroke.points[0];
-    if (!point) throw new Error("Cannot render empty stroke");
-    const isDot = stroke.points.every(
-      (other) => other.x === point.x && other.y === point.y,
-    );
-    if (isDot)
-      return `<circle cx="${point.x}" cy="${point.y}" r="${stroke.penWidth / 2}" fill="black"/>`;
-    return `<polyline points="${stroke.points.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="black" stroke-width="${stroke.penWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
-  });
+  const paths = strokes.map(strokeSvg);
   const background =
     options.background === "white"
       ? '<rect width="100%" height="100%" fill="white"/>'

@@ -1,10 +1,109 @@
 import { expect, test } from "bun:test";
 import {
+  composeInkAssets,
   createInkFragment,
+  type InkAsset,
   inkAssetJson,
   parseInkJson,
   renderInkAsset,
 } from "../src/index.ts";
+
+test("rotation and nested composition bound actual points including scaled pen radius", () => {
+  const a = createInkFragment(source, {
+    strokeIndices: [0],
+    presentation: display,
+  });
+  const b = createInkFragment(source, {
+    strokeIndices: [1],
+    presentation: display,
+  });
+  const library = new Map<string, InkAsset>([
+    [a.id, a],
+    [b.id, b],
+  ]);
+  const c = composeInkAssets(
+    source,
+    {
+      parts: [{ assetId: a.id, rotation: 90, scale: 2, x: -7, y: 13 }],
+      presentation: display,
+    },
+    library,
+  );
+  expect(c.bounds.x).toBeCloseTo(-55);
+  expect(c.bounds.y).toBeCloseTo(13);
+  expect(c.bounds.width).toBeCloseTo(48);
+  expect(c.bounds.height).toBeCloseTo(88);
+  library.set(c.id, c);
+  const d = composeInkAssets(
+    source,
+    {
+      parts: [
+        { assetId: c.id, rotation: -90, scale: 0.5, x: 10, y: -5 },
+        { assetId: b.id, rotation: 45, scale: 3, x: 100, y: 50 },
+      ],
+      presentation: display,
+    },
+    library,
+  );
+  const svg = renderInkAsset(source, d, library);
+  expect(svg).toContain('points="-10,20 30,40"');
+  expect(svg).toContain('<circle cx="50" cy="60" r="1"');
+  expect((svg.match(/<polyline/g) ?? []).length).toBe(1);
+  expect(d.strokeIndices).toEqual([0, 1]);
+  expect(renderInkAsset(source, JSON.parse(inkAssetJson(d)), library)).toBe(
+    svg,
+  );
+  expect(d.id).not.toBe(c.id);
+  expect(() =>
+    renderInkAsset(
+      source,
+      { ...d, parts: d.parts.map((p) => ({ ...p, x: p.x + 1 })) },
+      library,
+    ),
+  ).toThrow("mismatch");
+});
+
+test("compositions reject repeated strokes, stale dependencies and invalid transforms", () => {
+  const a = createInkFragment(source, {
+    strokeIndices: [0],
+    presentation: display,
+  });
+  const part = { assetId: a.id, rotation: 0, scale: 1, x: 0, y: 0 };
+  const library = new Map<string, InkAsset>([[a.id, a]]);
+  for (const parts of [
+    [],
+    [part, part],
+    [{ ...part, scale: 0 }],
+    [{ ...part, rotation: Infinity }],
+    [{ ...part, x: NaN }],
+    [{ ...part, scale: 1e308 }],
+  ])
+    expect(() =>
+      composeInkAssets(source, { parts, presentation: display }, library),
+    ).toThrow();
+  expect(() =>
+    composeInkAssets(
+      parseInkJson(`${raw}\n`),
+      { parts: [part], presentation: display },
+      library,
+    ),
+  ).toThrow("source");
+  expect(() =>
+    composeInkAssets(
+      source,
+      { parts: [part], presentation: display },
+      new Map(),
+    ),
+  ).toThrow("dependency");
+  const c = composeInkAssets(
+    source,
+    { parts: [part], presentation: display },
+    library,
+  );
+  const cycle = { ...c, parts: [{ ...part, assetId: c.id }] };
+  library.set(cycle.id, cycle);
+  expect(() => renderInkAsset(source, cycle, library)).toThrow("cyclic");
+});
 
 const raw = JSON.stringify([
   {

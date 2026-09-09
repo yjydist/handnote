@@ -1,7 +1,10 @@
 export {
+  composeInkAssets,
   createInkFragment,
   type InkAsset,
+  type InkComposition,
   type InkFragment,
+  type InkPlacement,
   type InkPresentation,
   inkAssetJson,
   renderInkAsset,
