@@ -1,4 +1,6 @@
 export { RenderError } from "./errors.ts";
+export type { InkReplacement, InkReplacementResult } from "./ink-renderer.ts";
+export { InkReplacementError, renderPreparedDocument } from "./ink-renderer.ts";
 export type {
   CompiledNote,
   ImageResolver,
