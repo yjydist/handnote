@@ -290,6 +290,22 @@ function pathCoverage(stroke: InkStroke, regions: readonly Bounds[]): number {
   }
   return covered;
 }
+
+function strokeIntersects(stroke: InkStroke, bounds: Bounds): boolean {
+  return stroke.points.some((point, index) => {
+    const previous = stroke.points[index - 1] ?? point;
+    return (
+      segmentInterval(
+        previous.x,
+        previous.y,
+        point.x - previous.x,
+        point.y - previous.y,
+        bounds,
+      ) !== undefined
+    );
+  });
+}
+
 function pathLength(stroke: InkStroke): number {
   return stroke.points.reduce((length, point, index) => {
     const previous = stroke.points[index - 1];
@@ -586,13 +602,25 @@ export function associateInk(
         metrics:
           !strokeIndices.length ||
           line.unusableReason ||
-          unusedStrokes.some(
-            (stroke) =>
-              stroke.reason !== "long-decoration" &&
+          unusedStrokes.some((stroke) => {
+            if (stroke.reason === "long-decoration") return false;
+            if (
               stroke.evidence.some(
                 (item) => item.lineId === lineId && item.nearbyRatio > 0,
+              )
+            )
+              return true;
+            const sourceStroke = document.strokes[stroke.strokeIndex];
+            if (!sourceStroke) throw new Error("Missing unused source stroke");
+            return strokeIntersects(
+              sourceStroke,
+              expanded(
+                line.box,
+                sourceStroke.penWidth / 2 +
+                  line.box.height * THRESHOLDS.nearbyMarginInLineHeights,
               ),
-          ) ||
+            );
+          }) ||
           unusedWords.some((word) => word.lineId === lineId)
             ? { status: "unavailable", reason: "incomplete-line-metrics" }
             : measureCompleteInkLine(document, strokeIndices),

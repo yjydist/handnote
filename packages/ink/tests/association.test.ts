@@ -123,6 +123,85 @@ describe("complete-trajectory OCR association", () => {
     });
   });
 
+  test("withholds metrics for page 69 stroke 883 geometry inside the line but above word boxes", () => {
+    const result = {
+      rec_texts: ["降"],
+      rec_scores: [0.95],
+      rec_boxes: [[233.29, 294.64, 578.29, 372.64]],
+      text_word: [["降"]],
+      text_word_boxes: [[[484.29, 314.64, 522.29, 353.64]]],
+    };
+    const glyph = [
+      [500, 320],
+      [500, 345],
+    ];
+    const original = associate([glyph], result);
+    expect(original.lines[0]?.metrics.status).toBe("available");
+    for (const unresolved of [
+      [[505.7, 300.1]],
+      [
+        [505.7, 300.1],
+        [505.7, 300.1],
+      ],
+      [
+        [200, 300.1],
+        [600, 300.1],
+      ],
+    ]) {
+      const report = associate([glyph, unresolved], result);
+      expect(
+        report.candidates.map((candidate) => candidate.strokeIndices),
+      ).toEqual([[0]]);
+      expect(report.unusedWords).toEqual([]);
+      expect(report.unusedStrokes[0]?.evidence).toEqual([]);
+      expect(report.lines[0]?.metrics).toEqual({
+        status: "unavailable",
+        reason: "incomplete-line-metrics",
+      });
+    }
+    const unrelated = associate(
+      [
+        glyph,
+        [
+          [200, 280],
+          [600, 280],
+        ],
+      ],
+      result,
+    );
+    expect(unrelated.lines[0]?.metrics.status).toBe("available");
+  });
+
+  test("known long decorations crossing another line box do not invalidate its metrics", () => {
+    const report = associate(
+      [
+        [
+          [0, 10],
+          [200, 10],
+        ],
+        [
+          [105, 45],
+          [105, 55],
+        ],
+      ],
+      {
+        rec_texts: ["人", "天"],
+        rec_scores: [0.95, 0.95],
+        rec_boxes: [
+          [0, 0, 10, 20],
+          [90, 0, 120, 60],
+        ],
+        text_word: [["人"], ["天"]],
+        text_word_boxes: [[[0, 0, 10, 20]], [[100, 40, 110, 60]]],
+      },
+    );
+    expect(report.unusedStrokes[0]?.reason).toBe("long-decoration");
+    expect(
+      report.candidates.map((candidate) => candidate.strokeIndices),
+    ).toEqual([[1]]);
+    expect(report.lines[1]?.metrics.status).toBe("available");
+  });
+
   test("keeps repeated occurrences separate and never shares strokes", () => {
     const report = associate([
       [
