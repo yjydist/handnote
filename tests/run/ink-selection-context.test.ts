@@ -6,6 +6,7 @@ import { createAgentTools } from "../../src/agent/agent-tools.ts";
 import type { InkToolResult } from "../../src/agent/index.ts";
 import type { Bounds, InkAsset } from "../../src/ink/index.ts";
 import { loadInkAsset } from "../../src/run/ink-assets.ts";
+import { readSession } from "../../src/run/session.ts";
 import { RunStore } from "../../src/run/store.ts";
 import { createHandnoteHandlers } from "../../src/tools/index.ts";
 
@@ -79,7 +80,7 @@ async function setup() {
   const select = tools.select_ink;
   if (!select?.execute || !select.toModelOutput)
     throw new Error("Missing ink tool");
-  return { store, select };
+  return { store, select, inspect: tools.inspect_ink };
 }
 
 function success(output: unknown) {
@@ -101,7 +102,7 @@ type SelectionItem = {
 };
 
 test("selection geometry exposes enclosed and crossing strokes per fragment through model media", async () => {
-  const { store, select } = await setup();
+  const { store, select, inspect } = await setup();
   const execute = select.execute;
   if (!execute || !select.toModelOutput) throw new Error("Missing ink tool");
   const output = success(
@@ -152,6 +153,41 @@ test("selection geometry exposes enclosed and crossing strokes per fragment thro
     expect((await sharp(path).metadata()).format).toBe("png");
   const visible = await select.toModelOutput(output);
   expect(visible).toMatchObject({ type: "content" });
+  const imageParts = (
+    visible as { value: Array<{ type: string; data?: string }> }
+  ).value.filter((part) => part.type === "image-data");
+  expect(imageParts).toHaveLength(1);
+  expect(JSON.stringify(visible)).toContain("numbered views 1, 2, 3");
+  const media = readSession(store.path("session/events.jsonl")).events.find(
+    (event) => event.type === "tool.model_media.prepared",
+  )?.data as {
+    contactSheet: {
+      originals: Array<{ view: number; width: number; height: number }>;
+    };
+  };
+  expect(media.contactSheet.originals.map((item) => item.view)).toEqual([
+    1, 2, 3,
+  ]);
+  for (const [index, path] of output.paths.entries()) {
+    const metadata = await sharp(path).metadata();
+    expect(media.contactSheet.originals[index]).toMatchObject({
+      width: metadata.width,
+      height: metadata.height,
+    });
+  }
+  if (!inspect?.execute || !inspect.toModelOutput || !items[0])
+    throw new Error("Missing asset reinspection");
+  const reinspection = success(
+    await inspect.execute(
+      { views: [{ kind: "asset", assetId: items[0].asset.id }] },
+      {} as Parameters<typeof inspect.execute>[1],
+    ),
+  );
+  const separate = await inspect.toModelOutput(reinspection);
+  const originalPath = output.paths[0];
+  if (!originalPath) throw new Error("Missing original preview");
+  expect(reinspection.paths).toEqual([originalPath]);
+  expect(JSON.stringify(separate)).not.toContain("material sheet");
   const content = (visible as { value: Array<{ type: string; text?: string }> })
     .value;
   const contextText = content[0]?.text;

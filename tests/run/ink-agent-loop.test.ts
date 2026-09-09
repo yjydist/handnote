@@ -168,7 +168,20 @@ test("offline model sees real media and rendered table counts before and after r
         })),
       },
     },
-    { name: "compose_ink", input: { compositions: [{ parts, presentation }] } },
+    {
+      name: "compose_ink",
+      input: {
+        compositions: [
+          { parts, presentation },
+          {
+            parts: [
+              { assetId: fragments[2]?.id, rotation: 0, scale: 1, x: 0, y: 0 },
+            ],
+            presentation,
+          },
+        ],
+      },
+    },
     {
       name: "write_note",
       input: {
@@ -254,6 +267,18 @@ test("offline model sees real media and rendered table counts before and after r
     expect(toolResults).not.toContain("coordinatesToPreview");
     expect(toolResults).not.toContain(store.directory);
   }
+  const selectedFeedback = JSON.stringify(
+    model.doGenerateCalls[2]?.prompt.filter(
+      (message) => message.role === "tool",
+    ),
+  );
+  expect(selectedFeedback).toContain("material sheet; numbered views 1, 2, 3");
+  const composedFeedback = JSON.stringify(
+    model.doGenerateCalls[3]?.prompt.filter(
+      (message) => message.role === "tool",
+    ),
+  );
+  expect(composedFeedback).toContain("material sheet; numbered views 1, 2;");
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
@@ -327,6 +352,16 @@ test("offline model sees real media and rendered table counts before and after r
     ].sort(),
   ).toEqual(["compose_ink", "inspect_ink", "review_render", "select_ink"]);
   expect(JSON.stringify(media)).toContain("session/model-previews/");
+  for (const purpose of ["select_ink", "compose_ink"]) {
+    const prepared = media.filter(
+      (event) => (event.data as { purpose: string }).purpose === purpose,
+    );
+    expect(prepared).toHaveLength(1);
+    expect(prepared[0]?.data).toMatchObject({
+      contactSheet: { kind: "sheet" },
+      previews: [expect.objectContaining({ mediaType: "image/jpeg" })],
+    });
+  }
   const measurements = events.filter(
     (event) => event.type === "tool.model_output.prepared",
   );
