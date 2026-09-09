@@ -149,11 +149,19 @@ export async function renderAutomatic(
       })),
     );
     const replacements: InkReplacement[] = [];
+    const metricFallbacks = [];
     for (const match of binding.bindings) {
       const candidate = associated.candidates.find(
         (item) => item.id === match.sourceId,
       );
       if (!candidate) throw new Error("Missing source binding");
+      const line = associated.lines.find(
+        (line) => line.lineId === candidate.lineId,
+      );
+      if (!line || line.metrics.status !== "available") {
+        metricFallbacks.push({ ...match, reason: "incomplete-line-metrics" });
+        continue;
+      }
       const image = renderInkSvg(source, {
         strokeIndices: candidate.strokeIndices,
       });
@@ -166,6 +174,13 @@ export async function renderAutomatic(
         height: image.height,
         lineHeight: candidate.lineHeight,
         baseline: candidate.baseline,
+        layout: {
+          mode: "shared-line",
+          lineId: `${source.sourceHash}:${candidate.lineId}`,
+          sourceTop: image.bounds.y,
+          bodyHeight: line.metrics.bodyHeight,
+          bodyBottom: line.metrics.bodyBottom,
+        },
       });
     }
     const pageDirectory = join(destination, `page-${page.page}`);
@@ -210,6 +225,9 @@ export async function renderAutomatic(
       unusedStrokeReasons: counts(associated.unusedStrokes),
       unusedWordReasons: counts(associated.unusedWords),
       bindingFallbackReasons: counts(binding.unusedSources),
+      metricFallbackReasons: counts(metricFallbacks),
+      metricFallbacks,
+      layoutMethod: "complete-line-visible-envelope",
       eligibleCharacters,
       inkCharacters,
       candidateCoverage: eligibleCharacters

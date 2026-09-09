@@ -16,6 +16,7 @@ import {
 } from "@handnote/renderer";
 import sharp from "sharp";
 import development from "./development.json";
+import { prepareDevelopmentLines } from "./development.ts";
 
 export const comparisonWidths = [720, 1200, 1600] as const;
 const hash = (value: string | Uint8Array) =>
@@ -79,18 +80,24 @@ export async function renderComparison(
         source,
         markdown,
         prepared: await prepareDocument(markdown),
+        lines: prepareDevelopmentLines(source, page),
       };
     }),
   );
   await mkdir(outputDirectory, { recursive: false });
   const reports = [];
-  for (const { page, source, markdown, prepared } of inputs) {
+  for (const { page, source, markdown, prepared, lines } of inputs) {
     const natural: InkReplacement[] = [];
-    const fixed: InkReplacement[] = [];
-    const fixedFallbacks = [];
+    const shared: InkReplacement[] = [];
+    const metricFallbacks = [];
     for (const selection of page.fragments) {
       const target = locate(prepared, selection.text, selection.occurrence);
-      const candidate = createInkCandidate(source, selection);
+      const line = lines.get(selection.lineId);
+      if (!line) throw new Error("Missing development line");
+      const candidate = createInkCandidate(source, {
+        ...selection,
+        ...line.legacyLayout,
+      });
       const ink = await fragment(source, selection.strokeIndices);
       natural.push({
         target,
@@ -102,46 +109,33 @@ export async function renderComparison(
         lineHeight: candidate.lineHeight,
         baseline: candidate.baseline,
       });
-      if (!("singleCharacterStrokeGroups" in selection)) {
-        fixedFallbacks.push({
+      if (line.metrics.status !== "available") {
+        metricFallbacks.push({
           sourceId: candidate.id,
           target,
           text: candidate.text,
-          reason: "no-separable-character-candidate",
+          reason: line.metrics.reason,
+          lineId: selection.lineId,
         });
         continue;
       }
-      const groups = selection.singleCharacterStrokeGroups;
-      if (
-        groups.flat().join(",") !== selection.strokeIndices.join(",") ||
-        groups.length !== Array.from(selection.text).length
-      )
-        throw new Error("Invalid complete-stroke character partition");
-      let offset = target.start;
-      for (const [index, text] of Array.from(selection.text).entries()) {
-        const indices = groups[index];
-        if (!indices) throw new Error("Missing character strokes");
-        const character = await fragment(source, indices);
-        // Fixed character cells are an experiment-only control, preserving each complete character.
-        const png = await sharp(character.png)
-          .resize(64, 64, {
-            fit: "contain",
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-          })
-          .png()
-          .toBuffer();
-        fixed.push({
-          target: { ...target, start: offset, end: offset + text.length },
-          sourceId: `${source.sourceHash}:${indices.join(",")}`,
-          text,
-          png,
-          width: 64,
-          height: 64,
-          lineHeight: 64,
-          baseline: 54,
-        });
-        offset += text.length;
-      }
+      shared.push({
+        target,
+        sourceId: candidate.id,
+        text: candidate.text,
+        png: ink.png,
+        width: ink.width,
+        height: ink.height,
+        lineHeight: candidate.lineHeight,
+        baseline: candidate.baseline,
+        layout: {
+          mode: "shared-line",
+          lineId: `${source.sourceHash}:${selection.lineId}`,
+          sourceTop: ink.bounds.y,
+          bodyHeight: line.metrics.bodyHeight,
+          bodyBottom: line.metrics.bodyBottom,
+        },
+      });
     }
     const eligibleCharacters = prepared.textRanges.reduce(
       (sum, range) => sum + Array.from(range.text.replace(/\s/g, "")).length,
@@ -150,8 +144,8 @@ export async function renderComparison(
     for (const width of comparisonWidths) {
       for (const [mode, replacements] of [
         ["font", []],
-        ["fixed-character", fixed],
-        ["natural", natural],
+        ["legacy-natural", natural],
+        ["shared-line", shared],
       ] as const) {
         const relative = `page-${page.page}/${width}/${mode}`;
         const directory = join(outputDirectory, relative);
@@ -175,7 +169,9 @@ export async function renderComparison(
           height: render.height,
           sourceHash: source.sourceHash,
           markdownHash: hash(markdown),
-          candidatesHash: hash(JSON.stringify(page.fragments)),
+          candidatesHash: hash(
+            JSON.stringify({ fragments: page.fragments, lines: page.lines }),
+          ),
           bindingHash: hash(
             JSON.stringify(
               replacements.map(({ png, ...binding }) => ({
@@ -194,7 +190,8 @@ export async function renderComparison(
           annotationStatus: "pending-human-review",
           replacements: render.replacements,
           warnings: render.warnings,
-          fixedFallbacks: mode === "fixed-character" ? fixedFallbacks : [],
+          metricFallbacks: mode === "shared-line" ? metricFallbacks : [],
+          sourceLines: [...lines.values()],
           image: `${relative}/note.png`,
           html: `${relative}/note.html`,
         };
@@ -229,7 +226,7 @@ export async function renderComparison(
     .join("");
   await writeFile(
     join(outputDirectory, "index.html"),
-    `<!doctype html><meta charset="utf-8"><title>原笔迹排版对照</title><style>body{font:16px sans-serif;max-width:1100px;margin:40px auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:10px}img{max-width:100%}</style><h1>原笔迹排版对照</h1><p>所有片段与转写待人工核验。覆盖分母仅为固定摘录，不是整页准确率。固定字框仅使用三页标题的候选完整单字分组，其余文字明确回退，不切断连笔。</p><table><tr><th>页</th><th>宽度</th><th>方式</th><th>候选笔迹字符</th><th>产物</th></tr>${rows}</table><h2>第69页：1200px 自然片段</h2><img src="page-69/1200/natural/note.png">`,
+    `<!doctype html><meta charset="utf-8"><title>原笔迹排版对照</title><style>body{font:16px sans-serif;max-width:1100px;margin:40px auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:10px}img{max-width:100%}</style><h1>原笔迹排版对照</h1><p>所有片段与转写待人工核验。覆盖分母仅为固定摘录，不是整页准确率。同一来源行共享可见字框；存在归属未决笔画时整行回退。legacy-natural 保留首轮参数供对照。</p><table><tr><th>页</th><th>宽度</th><th>方式</th><th>候选笔迹字符</th><th>产物</th></tr>${rows}</table><h2>第69页：1200px 共享行度量</h2><img src="page-69/1200/shared-line/note.png">`,
     { flag: "wx" },
   );
   return outputDirectory;

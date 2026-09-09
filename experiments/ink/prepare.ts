@@ -13,6 +13,7 @@ import {
 } from "@handnote/ink";
 import sharp from "sharp";
 import development from "./development.json";
+import { prepareDevelopmentLines } from "./development.ts";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -46,13 +47,22 @@ export async function prepareExperiment(output: string): Promise<string> {
       }
       const seen = new Set<number>();
       for (const fragment of page.fragments) {
+        if (
+          "singleCharacterStrokeGroups" in fragment &&
+          (fragment.singleCharacterStrokeGroups.flat().join(",") !==
+            fragment.strokeIndices.join(",") ||
+            fragment.singleCharacterStrokeGroups.length !==
+              Array.from(fragment.text).length)
+        )
+          throw new Error("Invalid complete-stroke character partition");
         for (const index of fragment.strokeIndices) {
           if (seen.has(index))
             throw new Error(`Page ${page.page} reuses stroke ${index}`);
           seen.add(index);
         }
       }
-      return { page, document, bytes };
+      const lines = prepareDevelopmentLines(document, page);
+      return { page, document, bytes, lines };
     }),
   );
   await mkdir(dirname(outputDirectory), { recursive: true });
@@ -60,7 +70,7 @@ export async function prepareExperiment(output: string): Promise<string> {
   await mkdir(outputDirectory);
   const ocrPages = [];
   const pages = [];
-  for (const { page, document, bytes } of sources) {
+  for (const { page, document, bytes, lines } of sources) {
     const pageDirectory = join(outputDirectory, `page-${page.page}`);
     const fragmentsDirectory = join(pageDirectory, "fragments");
     await mkdir(fragmentsDirectory, { recursive: true });
@@ -91,10 +101,28 @@ export async function prepareExperiment(output: string): Promise<string> {
     await sharp(Buffer.from(numberedSvg(document, numbered)))
       .png()
       .toFile(join(pageDirectory, "stroke-indices.png"));
+    await mkdir(join(pageDirectory, "lines"));
+    for (const line of lines.values()) {
+      const image = renderInkSvg(document, {
+        strokeIndices: [...line.strokeIndices, ...line.unresolvedStrokeIndices],
+        scale: 2,
+        padding: 16,
+        background: "white",
+      });
+      await sharp(Buffer.from(numberedSvg(document, image)))
+        .png()
+        .toFile(join(pageDirectory, `lines/${line.lineId}.png`));
+    }
+    await writeJson(join(pageDirectory, "lines.json"), [...lines.values()]);
     const candidates = [];
     const overlay = [];
     for (const fragment of page.fragments) {
-      const candidate = createInkCandidate(document, fragment);
+      const line = lines.get(fragment.lineId);
+      if (!line) throw new Error("Missing development line");
+      const candidate = createInkCandidate(document, {
+        ...fragment,
+        ...line.legacyLayout,
+      });
       const ink = renderInkSvg(document, {
         strokeIndices: fragment.strokeIndices,
       });
@@ -132,14 +160,16 @@ export async function prepareExperiment(output: string): Promise<string> {
             image,
             bounds: character.bounds,
             transform: character.transform,
-            baseline: fragment.baseline - character.bounds.y,
-            lineHeight: fragment.lineHeight,
+            baseline: line.legacyLayout.baseline - character.bounds.y,
+            lineHeight: line.legacyLayout.lineHeight,
           });
         }
       }
       candidates.push({
         ...candidate,
         key: fragment.key,
+        lineId: fragment.lineId,
+        metrics: line.metrics,
         target: { text: fragment.text, occurrence: fragment.occurrence },
         image: `fragments/${fragment.key}.png`,
         width: ink.width,
@@ -175,6 +205,7 @@ export async function prepareExperiment(output: string): Promise<string> {
         0,
       ),
       candidateCount: candidates.length,
+      sourceLineCount: lines.size,
       sourceStrokeCount: document.strokes.length,
       selectedStrokeCount: candidates.reduce(
         (count, candidate) => count + candidate.strokeIndices.length,

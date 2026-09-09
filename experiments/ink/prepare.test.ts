@@ -49,6 +49,27 @@ test("preparation preserves source identity, transparent fragments and refuses o
       join(output, "page-69/fragments/69-1.png"),
     ).metadata();
     expect(fragment.hasAlpha).toBe(true);
+    const lines = JSON.parse(
+      await readFile(join(output, "page-69/lines.json"), "utf8"),
+    );
+    const forecast = lines.find(
+      (line: { lineId: string }) => line.lineId === "69-forecast",
+    );
+    expect(forecast.unresolvedStrokeIndices).toEqual([883]);
+    expect(forecast.metrics).toEqual({
+      status: "unavailable",
+      reason: "incomplete-line-metrics",
+    });
+    const candidates = JSON.parse(
+      await readFile(join(output, "page-2/candidates.json"), "utf8"),
+    ).candidates;
+    const ending = candidates.filter(
+      (candidate: { lineId: string }) => candidate.lineId === "2-ending",
+    );
+    expect(ending).toHaveLength(3);
+    expect(ending[0].metrics).toEqual(ending[1].metrics);
+    expect(ending[1].metrics).toEqual(ending[2].metrics);
+    expect(ending[0].metrics.strokeIndices).toContain(271);
     const note = await readFile(join(output, "page-69/note.md"), "utf8");
     await expect(prepareExperiment(output)).rejects.toThrow("EEXIST");
     expect(await readFile(join(output, "page-69/note.md"), "utf8")).toBe(note);

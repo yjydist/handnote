@@ -11,7 +11,7 @@ bun run eval:ink:prepare --output runs/ink-experiments/my-input
 bun run eval:ink --input runs/ink-experiments/my-input --output runs/ink-experiments/my-comparison
 ```
 
-准备过程保留原始 JSON、原图、黑色重绘、完整笔画编号、候选框叠图、透明片段及固定 Markdown。对照生成三页 × 三宽度（720、1200、1600）× 三模式（字体、固定单字方框、自然片段），从输出 `index.html` 浏览。单字方框仅使用标题的候选完整笔画分组；其余部分显式回退字体。
+准备过程保留原始 JSON、原图、黑色重绘、完整笔画编号、候选框叠图、透明片段及固定 Markdown。对照生成三页 × 三宽度（720、1200、1600）× 三模式（字体、首轮自然度量、共享行度量），从输出 `index.html` 浏览。首轮单字方框对照保留在旧运行产物；当前新增整行编号图与共享度量。第 69 页预测行含归属未定的笔画 883，新度量明确回退。
 
 按 [OCR 环境说明](ocr/README.md) 安装锁定的独立 Python 环境，然后执行：
 
@@ -26,4 +26,4 @@ bun run eval:ink:auto --prepared runs/ink-experiments/my-input --ocr-run runs/in
 
 普通应用仍通过现有入口工作。包入口分别为 `@handnote/renderer` 与 `@handnote/ink`，图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，也没有拆分 Agent 或升级生产存储格式。
 
-本轮实测、疑点及后续判断见 [RESULTS.md](RESULTS.md)。
+首轮实测见 [RESULTS.md](RESULTS.md)；第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配，覆盖可能进一步下降。
