@@ -131,7 +131,8 @@ describe("prepared ink rendering", () => {
     });
     const narrow = await renderPreparedDocument(document, {
       directory: `${directory}/narrow`,
-      width: 400,
+      // Mobile padding leaves a 160px content box, forcing the third fragment to wrap.
+      width: 232,
       replacements,
     });
     const transformed = await renderPreparedDocument(document, {
@@ -182,7 +183,7 @@ describe("prepared ink rendering", () => {
       narrow.replacements[0]?.bounds?.y ?? -1,
     );
     expect(narrow.warnings).toEqual([]);
-    const reopened = await inspectHtml(narrow.htmlPath, 400, (page) =>
+    const reopened = await inspectHtml(narrow.htmlPath, 232, (page) =>
       page.locator(".hn-ink-fragment").evaluateAll((nodes) =>
         nodes.map((node) => ({
           x: node.getBoundingClientRect().x,
@@ -490,7 +491,7 @@ describe("prepared ink rendering", () => {
     ).toBe(true);
   }, 30_000);
 
-  test("uses natural dimensions and the actual paragraph or list container width", async () => {
+  test("uses natural dimensions in 260px paragraph and 220px list content boxes", async () => {
     const directory = await temporary();
     const document = await prepareDocument("# 标题\n\n段落\n\n- 列表");
     const replacements = await Promise.all([
@@ -500,7 +501,7 @@ describe("prepared ink rendering", () => {
     ]);
     const result = await renderPreparedDocument(document, {
       directory,
-      width: 500,
+      width: 332,
       replacements,
     });
     expect(
@@ -514,8 +515,8 @@ describe("prepared ink rendering", () => {
     expect(result.replacements[0]?.bounds?.height).toBeCloseTo(48, 1);
     expect(result.replacements[1]?.bounds?.width).toBeCloseTo(240, 1);
     expect(result.warnings).toEqual([]);
-    expect((await sharp(result.imagePath).metadata()).width).toBe(500);
-    const state = await inspectHtml(result.htmlPath, 500, async (page) => ({
+    expect((await sharp(result.imagePath).metadata()).width).toBe(332);
+    const state = await inspectHtml(result.htmlPath, 332, async (page) => ({
       paragraphImages: await page.locator("p img").count(),
       listText: await page.locator("li").textContent(),
       listImages: await page.locator("li img").count(),
@@ -527,14 +528,14 @@ describe("prepared ink rendering", () => {
     });
   }, 30_000);
 
-  test("groups punctuation across font, image, strong and link boundaries without changing text", async () => {
+  test("groups punctuation across formatting boundaries within 260px content without changing text", async () => {
     const directory = await temporary();
     const document = await prepareDocument(
       "甲（**乙**）丁[戊](https://example.test)，己 &amp; 庚。",
     );
     const result = await renderPreparedDocument(document, {
       directory,
-      width: 500,
+      width: 332,
       replacements: await Promise.all([
         replacement(document, "乙", 200),
         replacement(document, "戊", 80),
@@ -542,7 +543,7 @@ describe("prepared ink rendering", () => {
     });
     expect(result.replacements.every(({ mode }) => mode === "ink")).toBe(true);
     expect(result.warnings).toEqual([]);
-    const state = await inspectHtml(result.htmlPath, 500, (page) =>
+    const state = await inspectHtml(result.htmlPath, 332, (page) =>
       page.evaluate(() => {
         const paragraph = globalThis.document.querySelector("p");
         if (!paragraph) throw new Error("Missing paragraph");
@@ -581,18 +582,18 @@ describe("prepared ink rendering", () => {
     });
   }, 30_000);
 
-  test("falls back an entire overwide punctuation group at narrower widths", async () => {
+  test("falls back an entire punctuation group when content narrows from 260px to 250px", async () => {
     const directory = await temporary();
     const document = await prepareDocument("甲，乙");
     const ink = await replacement(document, "甲", 240);
     const wide = await renderPreparedDocument(document, {
       directory: `${directory}/wide`,
-      width: 500,
+      width: 332,
       replacements: [ink],
     });
     const narrow = await renderPreparedDocument(document, {
       directory: `${directory}/narrow`,
-      width: 490,
+      width: 322,
       replacements: [ink],
     });
     expect(wide.replacements[0]?.mode).toBe("ink");
@@ -601,7 +602,7 @@ describe("prepared ink rendering", () => {
       reason: "punctuation_group_too_wide",
     });
     expect(narrow.warnings).toEqual([]);
-    const state = await inspectHtml(narrow.htmlPath, 490, async (page) => ({
+    const state = await inspectHtml(narrow.htmlPath, 322, async (page) => ({
       text: await page.locator("p").textContent(),
       images: await page.locator("p img").count(),
       groups: await page.locator(".hn-ink-group").count(),
@@ -643,14 +644,14 @@ describe("prepared ink rendering", () => {
     expect(metrics.baselineGap).toBeCloseTo(10, 1);
   }, 30_000);
 
-  test("falls back every ink member of an overwide group and preserves empty fragment anchors", async () => {
+  test("falls back every member of a group exceeding 250px content and preserves empty anchors", async () => {
     const directory = await temporary();
     const document = await prepareDocument(
       '[跳转](#anchor) 甲，<a id="anchor"></a>乙',
     );
     const result = await renderPreparedDocument(document, {
       directory,
-      width: 490,
+      width: 322,
       replacements: await Promise.all([
         replacement(document, "甲", 130),
         replacement(document, "，", 130),
@@ -662,7 +663,7 @@ describe("prepared ink rendering", () => {
       { mode: "font", reason: "punctuation_group_too_wide" },
       { mode: "font", reason: "punctuation_group_too_wide" },
     ]);
-    const state = await inspectHtml(result.htmlPath, 490, async (page) => ({
+    const state = await inspectHtml(result.htmlPath, 322, async (page) => ({
       text: await page.locator("p").textContent(),
       anchors: await page.locator("#user-content-anchor").count(),
       href: await page.getByRole("link", { name: "跳转" }).getAttribute("href"),

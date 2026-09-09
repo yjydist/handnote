@@ -10,6 +10,7 @@ import remarkRehype from "remark-rehype";
 import { parseSrcset, stringifySrcset } from "srcset";
 import { unified } from "unified";
 import { SKIP, visit } from "unist-util-visit";
+import { z } from "zod";
 import type { LayoutWarning, NoteStructure } from "./render-metadata.ts";
 
 export type { NoteStructure } from "./render-metadata.ts";
@@ -81,10 +82,26 @@ const isMath = (node: Element): boolean =>
     hasClass(node, name),
   );
 
-export interface ImageResource {
-  bytes: Uint8Array;
-  mimeType: "image/png" | "image/jpeg" | "image/webp";
-}
+const inkImageMetadataSchema = z
+  .object({
+    id: z.string().trim().min(1),
+    width: z.number().positive(),
+    height: z.number().positive(),
+    referenceHeight: z.number().positive(),
+    kind: z.enum(["text", "diagram"]),
+  })
+  .strict();
+
+export type InkImageMetadata = z.infer<typeof inkImageMetadataSchema>;
+
+export type ImageResource =
+  | { bytes: Uint8Array; mimeType: "image/png" | "image/jpeg" | "image/webp" }
+  | {
+      bytes: Uint8Array;
+      mimeType: "image/svg+xml";
+      /** Trusted resolver output; arbitrary SVG from Markdown is never accepted. */
+      ink: InkImageMetadata;
+    };
 
 export type ImageResolver = (src: string) => Promise<ImageResource>;
 
@@ -110,6 +127,29 @@ async function figureDataUri(
         "An image resource resolver is required",
       );
     const resource = await resolveImage(src);
+    if (resource.mimeType === "image/svg+xml") {
+      const metadata = inkImageMetadataSchema.safeParse(resource.ink);
+      if (!metadata.success || !resource.bytes.length)
+        throw new ImageResourceError(
+          "invalid_ink_image",
+          "SVG images require valid ink metadata and nonempty bytes",
+        );
+      const { id, kind, width, height, referenceHeight } = metadata.data;
+      if (
+        !Number.isFinite(width / referenceHeight) ||
+        !Number.isFinite(height / referenceHeight)
+      )
+        throw new ImageResourceError(
+          "invalid_ink_image",
+          "Ink scale must be finite",
+        );
+      node.properties.dataHnInk = id;
+      node.properties.dataHnInkKind = kind;
+      node.properties.dataHnReferenceHeight = referenceHeight;
+      node.properties.width = width;
+      node.properties.height = height;
+      node.properties.style = `display:${kind === "text" ? "inline-block" : "block"};width:${width / referenceHeight}em;height:${height / referenceHeight}em;vertical-align:baseline;max-width:none;flex-shrink:0`;
+    }
     return `data:${resource.mimeType};base64,${Buffer.from(resource.bytes).toString("base64")}`;
   } catch (error) {
     if (!(error instanceof ImageResourceError)) throw error;
@@ -125,6 +165,7 @@ async function figureDataUri(
 
 function prepareHtml(tree: Root, structure: NoteStructure): void {
   const ids = new Set<string>();
+  let inkImages = 0;
   visit(tree, "element", (node) => {
     for (const key of ["id", "name"]) {
       const id = node.properties[key];
@@ -149,6 +190,8 @@ function prepareHtml(tree: Root, structure: NoteStructure): void {
     if (/^h[1-6]$/.test(node.tagName)) structure.headings++;
     if (node.tagName === "table") structure.tables++;
     if (node.tagName === "img") structure.figures++;
+    if (node.properties.dataHnInk !== undefined)
+      node.properties.dataHnId = `ink-${++inkImages}`;
     if (isMath(node)) structure.equations++;
   });
   visit(tree, "element", (node) => {
@@ -168,7 +211,12 @@ function prepareHtml(tree: Root, structure: NoteStructure): void {
         return SKIP;
       }
     } else if (node.tagName === "p" && only.tagName === "img") {
+      if (only.properties.dataHnInkKind === "text") return;
       node.tagName = "figure";
+      if (only.properties.dataHnInkKind === "diagram") {
+        node.properties.className = ["hn-ink-diagram"];
+        return;
+      }
       const alt =
         typeof only.properties.alt === "string"
           ? only.properties.alt.trim()

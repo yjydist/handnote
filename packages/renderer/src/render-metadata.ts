@@ -6,6 +6,7 @@ export const layoutWarningSchema = z
     message: z.string(),
     blocking: z.boolean(),
     elementId: z.string().optional(),
+    assetId: z.string().optional(),
     axis: z.literal("horizontal").optional(),
     overflowPx: z.number().optional(),
     containerPx: z.number().optional(),

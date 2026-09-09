@@ -9,6 +9,7 @@ export type {
   CompiledNote,
   ImageResolver,
   ImageResource,
+  InkImageMetadata,
   MarkdownIssue,
 } from "./markdown.ts";
 export {
