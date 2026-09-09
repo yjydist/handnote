@@ -2,10 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { createInkFragment, parseInkJson } from "@handnote/ink";
 import { MockLanguageModelV3 } from "ai/test";
-import { RunStore } from "../apps/handnote/src/store.ts";
-import { sha256File } from "../apps/handnote/src/utils.ts";
 import {
   collectContextMetrics,
   collectFullPageEvidence,
@@ -13,6 +10,9 @@ import {
   runFullPageExperiment,
   selectFullPages,
 } from "../scripts/ink-eval.ts";
+import { createInkFragment, parseInkJson } from "../src/ink/index.ts";
+import { RunStore } from "../src/run/store.ts";
+import { sha256File } from "../src/run/utils.ts";
 
 const directories: string[] = [];
 async function temporary() {

@@ -1,26 +1,23 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadConfig } from "../apps/handnote/src/config.ts";
-import { safeErrorMetadata } from "../apps/handnote/src/errors.ts";
-import { loadInkLibrary } from "../apps/handnote/src/ink-assets.ts";
-import type { RunResult } from "../apps/handnote/src/manifest.ts";
-import { compileNoteMarkdown } from "../apps/handnote/src/markdown.ts";
-import { redact } from "../apps/handnote/src/redact.ts";
-import { renderDocument } from "../apps/handnote/src/renderer.ts";
+import { inkPrompt } from "../src/agent/ink-prompt.ts";
+import { loadConfig } from "../src/config.ts";
+import { safeErrorMetadata } from "../src/run/errors.ts";
+import { loadInkLibrary } from "../src/run/ink-assets.ts";
+import type { RunResult } from "../src/run/manifest.ts";
+import { compileNoteMarkdown } from "../src/run/markdown.ts";
+import { redact } from "../src/run/redact.ts";
+import { renderDocument } from "../src/run/renderer.ts";
 import {
   executePreparedRun,
   type PreparedRunOptions,
   validateInput,
-} from "../apps/handnote/src/run.ts";
-import {
-  readSession,
-  type SessionEvent,
-} from "../apps/handnote/src/session.ts";
-import { RunStore } from "../apps/handnote/src/store.ts";
-import { inkReviewWidths } from "../apps/handnote/src/tools/review-render.ts";
-import { atomicWrite, sha256, sha256File } from "../apps/handnote/src/utils.ts";
-import { inkPrompt } from "../packages/agent/src/ink-prompt.ts";
+} from "../src/run/run.ts";
+import { readSession, type SessionEvent } from "../src/run/session.ts";
+import { RunStore } from "../src/run/store.ts";
+import { atomicWrite, sha256, sha256File } from "../src/run/utils.ts";
+import { inkReviewWidths } from "../src/tools/review-render.ts";
 
 const root = resolve(import.meta.dir, "..");
 // Only source identities belong here: no historical excerpts, OCR, or fragment answers.

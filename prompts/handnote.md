@@ -1,1 +1,1 @@
-../packages/agent/prompts/handnote.md
+../src/agent/prompts/handnote.md

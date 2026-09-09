@@ -119,7 +119,7 @@ An append or flush failure disables that recorder: subsequent event writes repor
 
 ## Development
 
-Application code, business handlers, run storage, recovery, and evaluation live in `apps/handnote`. The private `@handnote/agent`, `@handnote/renderer`, and `@handnote/ink` workspaces expose their own package entries. The root `src/cli.ts` and `scripts/real-eval.ts` forward to the application package, so existing commands remain valid. `prompts/handnote.md` retains the default prompt path through a link to the Agent package.
+Application code lives in `src`, with internal Agent, Ink, Renderer, run storage and tool modules. The CLI is `src/cli.ts`; maintained evaluation entries live in `scripts`, and offline behavior tests live in `tests`. Dependencies are managed by one private package. `prompts/handnote.md` retains the configurable prompt path during prompt migration.
 
 ```sh
 bun test

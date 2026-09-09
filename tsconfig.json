@@ -12,16 +12,8 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "resolvePackageJsonExports": false,
-    "types": ["bun"]
+    "types": ["bun"],
+    "resolvePackageJsonExports": false
   },
-  "include": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "packages/renderer/**/*.ts",
-    "packages/ink/**/*.ts",
-    "packages/agent/**/*.ts",
-    "apps/handnote/**/*.ts",
-    "tests/**/*.ts"
-  ]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
 }
