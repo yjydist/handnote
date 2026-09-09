@@ -14,7 +14,7 @@
     "eval:ink:prepare": "bun experiments/ink/prepare.ts",
     "eval:ink": "bun experiments/ink/render.ts",
     "eval:ink:auto": "bun experiments/ink/automatic.ts",
-    "eval:ink:full": "bun experiments/ink/full-page.ts"
+    "eval:ink:full": "bun scripts/ink-eval.ts"
   },
   "dependencies": {
     "playwright": "1.62.0",

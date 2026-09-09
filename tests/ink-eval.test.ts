@@ -4,14 +4,15 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { createInkFragment, parseInkJson } from "@handnote/ink";
 import { MockLanguageModelV3 } from "ai/test";
-import { RunStore } from "../../apps/handnote/src/store.ts";
-import { sha256File } from "../../apps/handnote/src/utils.ts";
+import { RunStore } from "../apps/handnote/src/store.ts";
+import { sha256File } from "../apps/handnote/src/utils.ts";
 import {
+  collectContextMetrics,
   collectFullPageEvidence,
   fullPageSources,
   runFullPageExperiment,
   selectFullPages,
-} from "./full-page.ts";
+} from "../scripts/ink-eval.ts";
 
 const directories: string[] = [];
 async function temporary() {
@@ -167,3 +168,43 @@ test("evidence export renders all widths from the last valid revision and record
   expect(evidence.materials).toEqual([asset]);
   expect((await RunStore.open(directory)).manifest.status).toBe("partial");
 }, 30000);
+
+test("context metrics preserve available attempt and model-output measurements", () => {
+  const event = (type: string, data: unknown, seq: number) => ({
+    type,
+    data,
+    seq,
+    time: "2026-09-09",
+  });
+  expect(
+    collectContextMetrics([
+      event("model.attempt.started", { step: 1, attempt: 1 }, 1),
+      event(
+        "model.attempt.started",
+        {
+          step: 2,
+          attempt: 1,
+          request: { bytes: 42, imageCount: 3, textChars: 12 },
+        },
+        2,
+      ),
+      event(
+        "tool.model_output.prepared",
+        {
+          purpose: "select_ink",
+          textChars: 50,
+          imageCount: 2,
+          imagePixels: 200,
+        },
+        3,
+      ),
+    ]),
+  ).toEqual({
+    requests: [
+      { step: 2, attempt: 1, bytes: 42, imageCount: 3, textChars: 12 },
+    ],
+    toolOutputs: [
+      { purpose: "select_ink", textChars: 50, imageCount: 2, imagePixels: 200 },
+    ],
+  });
+});

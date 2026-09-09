@@ -1,29 +1,28 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { loadConfig } from "../../apps/handnote/src/config.ts";
-import { safeErrorMetadata } from "../../apps/handnote/src/errors.ts";
-import { loadInkLibrary } from "../../apps/handnote/src/ink-assets.ts";
-import type { RunResult } from "../../apps/handnote/src/manifest.ts";
-import { compileNoteMarkdown } from "../../apps/handnote/src/markdown.ts";
-import { redact } from "../../apps/handnote/src/redact.ts";
-import { renderDocument } from "../../apps/handnote/src/renderer.ts";
+import { loadConfig } from "../apps/handnote/src/config.ts";
+import { safeErrorMetadata } from "../apps/handnote/src/errors.ts";
+import { loadInkLibrary } from "../apps/handnote/src/ink-assets.ts";
+import type { RunResult } from "../apps/handnote/src/manifest.ts";
+import { compileNoteMarkdown } from "../apps/handnote/src/markdown.ts";
+import { redact } from "../apps/handnote/src/redact.ts";
+import { renderDocument } from "../apps/handnote/src/renderer.ts";
 import {
   executePreparedRun,
   type PreparedRunOptions,
   validateInput,
-} from "../../apps/handnote/src/run.ts";
-import { readSession } from "../../apps/handnote/src/session.ts";
-import { RunStore } from "../../apps/handnote/src/store.ts";
-import { inkReviewWidths } from "../../apps/handnote/src/tools/review-render.ts";
+} from "../apps/handnote/src/run.ts";
 import {
-  atomicWrite,
-  sha256,
-  sha256File,
-} from "../../apps/handnote/src/utils.ts";
-import { inkPrompt } from "../../packages/agent/src/ink-prompt.ts";
+  readSession,
+  type SessionEvent,
+} from "../apps/handnote/src/session.ts";
+import { RunStore } from "../apps/handnote/src/store.ts";
+import { inkReviewWidths } from "../apps/handnote/src/tools/review-render.ts";
+import { atomicWrite, sha256, sha256File } from "../apps/handnote/src/utils.ts";
+import { inkPrompt } from "../packages/agent/src/ink-prompt.ts";
 
-const root = resolve(import.meta.dir, "../..");
+const root = resolve(import.meta.dir, "..");
 // Only source identities belong here: no historical excerpts, OCR, or fragment answers.
 export const fullPageSources = [
   {
@@ -57,6 +56,26 @@ export function selectFullPages(pages: readonly string[]) {
       );
     return source;
   });
+}
+
+export function collectContextMetrics(events: readonly SessionEvent[]) {
+  const requests = events
+    .filter((event) => event.type === "model.attempt.started")
+    .flatMap((event): Record<string, unknown>[] => {
+      if (!event.data || typeof event.data !== "object") return [];
+      const data = event.data as {
+        step?: number;
+        attempt?: number;
+        request?: Record<string, unknown>;
+      };
+      return data.request
+        ? [{ step: data.step, attempt: data.attempt, ...data.request }]
+        : [];
+    });
+  const toolOutputs = events
+    .filter((event) => event.type === "tool.model_output.prepared")
+    .map((event) => event.data);
+  return { requests, toolOutputs };
 }
 
 export async function collectFullPageEvidence(result: RunResult) {
@@ -123,6 +142,7 @@ export async function collectFullPageEvidence(result: RunResult) {
     revisions: store.manifest.revisions,
     final: store.manifest.final,
     toolCalls: counts,
+    contextMetrics: collectContextMetrics(events),
     revisionAudit: events
       .filter((event) => event.type === "document.revision.committed")
       .at(-1)?.data,
@@ -227,6 +247,7 @@ export async function runFullPageExperiment(options: {
           `${result.runDirectory}/experiment/evidence.json`,
         ),
         views: evidence.views,
+        contextMetrics: evidence.contextMetrics,
         judgment: "pending-human-review",
         acceptance: "not-assessed",
       });
@@ -273,7 +294,7 @@ if (import.meta.main) {
   const outputDirectory = values.output;
   if (!outputDirectory)
     throw new Error(
-      "Usage: bun experiments/ink/full-page.ts --output <new-directory> [--config config.yaml] [--pages 2,69,70]",
+      "Usage: bun run eval:ink:full -- --output <new-directory> [--config config.yaml] [--pages 2,69,70]",
     );
   const result = await runFullPageExperiment({
     configPath: values.config ?? resolve(root, "config.yaml"),

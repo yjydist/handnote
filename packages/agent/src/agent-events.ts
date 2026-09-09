@@ -2,12 +2,24 @@ import type { SafeErrorMetadata } from "./agent-errors.ts";
 import type { ModelAccounting } from "./model-accounting.ts";
 import type { StepUsage, TokenUsage } from "./usage.ts";
 
+export interface ModelRequestFingerprint {
+  sha256: string;
+  bytes: number;
+  imageCount: number;
+  /** UTF-16 code units in message content text, excluding media URLs. */
+  messageTextChars?: number;
+  /** UTF-16 code units in serialized assistant tool-call arguments. */
+  toolCallArgumentChars?: number;
+  /** UTF-16 code units in the tools array, including descriptions and schemas. */
+  toolSchemaChars?: number;
+}
+
 interface ModelEventData {
   "model.run.started": { maxSteps: number };
   "model.attempt.started": {
     step: number;
     attempt: number;
-    request?: { sha256: string; bytes: number; imageCount: number };
+    request?: ModelRequestFingerprint;
   };
   "model.attempt.completed": {
     step: number;

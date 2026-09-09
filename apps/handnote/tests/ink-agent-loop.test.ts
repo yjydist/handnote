@@ -305,6 +305,20 @@ test("offline model sees real media and rendered table counts before and after r
   );
   expect(media.length).toBeGreaterThanOrEqual(11);
   expect(JSON.stringify(media)).toContain("session/model-previews/");
+  const measurements = events.filter(
+    (event) => event.type === "tool.model_output.prepared",
+  );
+  expect(measurements.length).toBeGreaterThan(0);
+  for (const measurement of measurements) {
+    const data = measurement.data as {
+      textChars: number;
+      imageCount: number;
+      imagePixels: number;
+    };
+    expect(data.textChars).toBeGreaterThan(0);
+    expect(data.imageCount).toBeGreaterThan(0);
+    expect(data.imagePixels).toBeGreaterThan(0);
+  }
   await RunStore.open(store.directory);
 }, 60000);
 

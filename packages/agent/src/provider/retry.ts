@@ -1,21 +1,21 @@
 import { createHash } from "node:crypto";
 import { safeErrorMetadata } from "../agent-errors.ts";
+import type { ModelRequestFingerprint } from "../agent-events.ts";
 import type { RunState } from "../state.ts";
 import { classifyProviderError } from "./classify.ts";
 import { isRetryableStatus, record, retryAfter } from "./primitives.ts";
 import type { RetryConfig } from "./types.ts";
 
-export function requestFingerprint(body: BodyInit | null | undefined):
-  | {
-      sha256: string;
-      bytes: number;
-      imageCount: number;
-    }
-  | undefined {
+export function requestFingerprint(
+  body: BodyInit | null | undefined,
+): ModelRequestFingerprint | undefined {
   if (typeof body !== "string") return undefined;
   let imageCount = 0;
+  let messageTextChars: number | undefined;
+  let toolCallArgumentChars: number | undefined;
+  let toolSchemaChars: number | undefined;
   try {
-    const parsed = JSON.parse(body);
+    const parsed = record(JSON.parse(body));
     const visit = (value: unknown): void => {
       if (Array.isArray(value)) {
         for (const item of value) visit(item);
@@ -26,12 +26,43 @@ export function requestFingerprint(body: BodyInit | null | undefined):
       if (item.type === "image_url") imageCount++;
       for (const child of Object.values(item)) visit(child);
     };
-    visit(record(parsed)?.messages);
+    visit(parsed?.messages);
+    if (Array.isArray(parsed?.messages)) {
+      messageTextChars = 0;
+      toolCallArgumentChars = 0;
+      for (const value of parsed.messages) {
+        const message = record(value);
+        if (typeof message?.content === "string") {
+          messageTextChars += message.content.length;
+        } else if (Array.isArray(message?.content)) {
+          for (const value of message.content) {
+            const part = record(value);
+            if (part?.type === "text" && typeof part.text === "string")
+              messageTextChars += part.text.length;
+          }
+        }
+        if (Array.isArray(message?.tool_calls)) {
+          for (const value of message.tool_calls) {
+            const args = record(record(value)?.function)?.arguments;
+            if (typeof args === "string") toolCallArgumentChars += args.length;
+          }
+        }
+      }
+      toolSchemaChars =
+        parsed.tools === undefined
+          ? 0
+          : Array.isArray(parsed.tools)
+            ? JSON.stringify(parsed.tools).length
+            : undefined;
+    }
   } catch {}
   return {
     sha256: createHash("sha256").update(body).digest("hex"),
     bytes: Buffer.byteLength(body),
     imageCount,
+    ...(messageTextChars === undefined ? {} : { messageTextChars }),
+    ...(toolCallArgumentChars === undefined ? {} : { toolCallArgumentChars }),
+    ...(toolSchemaChars === undefined ? {} : { toolSchemaChars }),
   };
 }
 

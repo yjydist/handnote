@@ -130,3 +130,7 @@ bun run check
 The [offline checks workflow](.github/workflows/ci.yml) runs these commands for pull requests and pushes targeting `dev` or `v1.3.0`. On Linux, use `bunx playwright install --with-deps chromium` to install Chromium and its system dependencies. No personal `config.yaml`, Provider credentials, or local `data/` are required.
 
 Tests are offline and must not call a real Provider. The MVP intentionally omits multiple images/models, OCR, human approval, resume/replay, remote tracing, Mastra Memory/Storage/Workflow, and compatibility migrations.
+
+### Full-page ink evaluation
+
+`bun run eval:ink:full -- --output <new-directory> --config config.yaml --pages 2,69,70` runs the pinned development pages through the application. It saves source and material evidence, categorized model usage, per-attempt request measurements, and model-facing tool text/image measurements. Missing historical measurements remain absent. This command calls the configured provider; offline tests inject a model.

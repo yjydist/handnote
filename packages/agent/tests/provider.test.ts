@@ -402,7 +402,86 @@ describe("provider transport", () => {
       sha256: fingerprint.sha256,
       bytes: Buffer.byteLength(body),
       imageCount: 1,
+      messageTextChars: 1,
+      toolCallArgumentChars: 0,
+      toolSchemaChars: 0,
     });
     expect(fingerprint.sha256).toHaveLength(64);
+  });
+
+  test("counts text and tool schemas without retaining content or media URLs", () => {
+    const argumentsText = JSON.stringify({ strokeIndices: [1, 2, 3] });
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "select_ink",
+          description: "Choose complete strokes",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ];
+    const body = JSON.stringify({
+      messages: [
+        { role: "system", content: "Source-faithful" },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "笔迹🖊" },
+            {
+              type: "image_url",
+              image_url: { url: "data:image/jpeg;base64,private-image-data" },
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              type: "function",
+              id: "call-1",
+              function: { name: "select_ink", arguments: argumentsText },
+            },
+          ],
+        },
+        { role: "tool", tool_call_id: "call-1", content: "Selected" },
+      ],
+      tools,
+      api_key: "private-credential",
+    });
+    const fingerprint = requestFingerprint(body);
+    if (!fingerprint) throw new Error("missing request fingerprint");
+    expect(fingerprint).toMatchObject({
+      bytes: Buffer.byteLength(body),
+      imageCount: 1,
+      messageTextChars: "Source-faithful笔迹🖊Selected".length,
+      toolCallArgumentChars: argumentsText.length,
+      toolSchemaChars: JSON.stringify(tools).length,
+    });
+    expect(JSON.stringify(fingerprint)).not.toContain("private");
+    expect(JSON.stringify(fingerprint)).not.toContain("Source-faithful");
+    expect(JSON.stringify(fingerprint)).not.toContain("select_ink");
+    expect(requestFingerprint(body)).toEqual(fingerprint);
+  });
+
+  test("distinguishes missing request text measurements from measured zero", () => {
+    expect(requestFingerprint(undefined)).toBeUndefined();
+    for (const body of ["{", "null", '{"messages":null}']) {
+      const fingerprint = requestFingerprint(body);
+      expect(fingerprint).toMatchObject({ bytes: Buffer.byteLength(body) });
+      expect(fingerprint).not.toHaveProperty("messageTextChars");
+      expect(fingerprint).not.toHaveProperty("toolCallArgumentChars");
+      expect(fingerprint).not.toHaveProperty("toolSchemaChars");
+    }
+    expect(requestFingerprint('{"messages":[]}')).toMatchObject({
+      imageCount: 0,
+      messageTextChars: 0,
+      toolCallArgumentChars: 0,
+      toolSchemaChars: 0,
+    });
+    expect(
+      requestFingerprint('{"messages":[],"tools":null}'),
+    ).not.toHaveProperty("toolSchemaChars");
   });
 });

@@ -86,6 +86,15 @@ export function createMediaHandler(
         previews: evidence,
       });
     }
+    context.recorder.record("tool.model_output.prepared", {
+      purpose,
+      textChars: (output.summary ?? "Image result").length,
+      imageCount: previews.length,
+      imagePixels: previews.reduce(
+        (sum, preview) => sum + preview.width * preview.height,
+        0,
+      ),
+    });
     return {
       kind: "previews",
       summary: output.summary ?? "Image result",
