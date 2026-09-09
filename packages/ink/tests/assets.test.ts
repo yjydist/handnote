@@ -105,6 +105,73 @@ test("compositions reject repeated strokes, stale dependencies and invalid trans
   expect(() => renderInkAsset(source, cycle, library)).toThrow("cyclic");
 });
 
+test("a valid neighbouring stroke cannot conceal an underflowed nested stroke", () => {
+  const a = createInkFragment(source, {
+    strokeIndices: [0],
+    presentation: display,
+  });
+  const b = createInkFragment(source, {
+    strokeIndices: [1],
+    presentation: display,
+  });
+  const library = new Map<string, InkAsset>([
+    [a.id, a],
+    [b.id, b],
+  ]);
+  for (const scale of [1e-200, 1e-50, 1e40])
+    expect(() =>
+      composeInkAssets(
+        source,
+        {
+          parts: [{ assetId: a.id, rotation: 0, scale, x: 0, y: 0 }],
+          presentation: display,
+        },
+        library,
+      ),
+    ).toThrow("stroke scale");
+  const tiny = composeInkAssets(
+    source,
+    {
+      parts: [{ assetId: a.id, rotation: 0, scale: 0.01, x: 0, y: 0 }],
+      presentation: display,
+    },
+    library,
+  );
+  library.set(tiny.id, tiny);
+  expect(() =>
+    composeInkAssets(
+      source,
+      {
+        parts: [
+          { assetId: tiny.id, rotation: 0, scale: 0.01, x: 0, y: 0 },
+          { assetId: b.id, rotation: 0, scale: 1, x: 0, y: 0 },
+        ],
+        presentation: display,
+      },
+      library,
+    ),
+  ).toThrow("stroke scale");
+});
+
+test("rotation roundoff does not reject the permitted scale boundaries", () => {
+  const asset = createInkFragment(source, {
+    strokeIndices: [0],
+    presentation: display,
+  });
+  for (const scale of [0.01, 100])
+    for (const rotation of [-171, 37, 94])
+      expect(() =>
+        composeInkAssets(
+          source,
+          {
+            parts: [{ assetId: asset.id, rotation, scale, x: 0, y: 0 }],
+            presentation: display,
+          },
+          new Map([[asset.id, asset]]),
+        ),
+      ).not.toThrow();
+});
+
 const raw = JSON.stringify([
   {
     brush_style: "pen",

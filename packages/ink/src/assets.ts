@@ -57,6 +57,19 @@ interface PlacedStroke {
 }
 type AssetLibrary = ReadonlyMap<string, InkAsset>;
 
+// v1 supports typographic adjustments, not scales that lose strokes in SVG's numeric representation.
+function checkInkScale(scale: number): void {
+  const roundoff = 1e-12;
+  if (
+    !Number.isFinite(scale) ||
+    scale < 0.01 * (1 - roundoff) ||
+    scale > 100 * (1 + roundoff)
+  )
+    throw new Error(
+      "Ink stroke scale must remain between 0.01 and 100, including nested transforms",
+    );
+}
+
 /** Stable encoding also rejects unknown fields when compared with a regenerated descriptor. */
 export function inkAssetJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(inkAssetJson).join(",")}]`;
@@ -146,6 +159,7 @@ function placement(input: InkPlacement): InkPlacement {
     throw new Error(
       "Invalid ink placement; rotation, positive scale and translation are required",
     );
+  checkInkScale(input.scale);
   return Object.freeze({
     assetId: input.assetId,
     rotation: input.rotation,
@@ -234,7 +248,9 @@ function buildComposition(
     const stroke = document.strokes[placed.index];
     if (!stroke) throw new Error("Missing source stroke");
     const [a, b, c, d, e, f] = placed.matrix;
-    const radius = (stroke.penWidth / 2) * Math.hypot(a, b);
+    const scale = Math.hypot(a, b);
+    checkInkScale(scale);
+    const radius = (stroke.penWidth / 2) * scale;
     for (const point of stroke.points) {
       const x = a * point.x + c * point.y + e,
         y = b * point.x + d * point.y + f;
