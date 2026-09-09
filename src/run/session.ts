@@ -130,6 +130,17 @@ export class SessionRecorder {
     return this.append(type, this.sanitize(data));
   }
 
+  recordModelRunStarted(data: {
+    maxSteps: number;
+    promptSha256: string;
+    source: unknown;
+  }): SessionEvent {
+    return this.append("model.run.started", {
+      ...this.sanitize(data),
+      promptSha256: data.promptSha256,
+    });
+  }
+
   recordInkRunCreated(inkMetadataSha256: string): SessionEvent {
     return this.append("run.created", { formatVersion: 2, inkMetadataSha256 });
   }

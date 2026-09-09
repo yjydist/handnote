@@ -15,7 +15,7 @@ The package registers the `handnote` bin. During development, invoke it with `bu
 
 ## Configure
 
-Configuration has no version field and rejects unknown keys. Prompt paths are resolved relative to the YAML file.
+Configuration has no version field and rejects unknown keys. Agent prompts are bundled with the application.
 
 ```yaml
 model:
@@ -24,20 +24,16 @@ model:
   name: vision-model
   timeoutMs: 240000
   maxRetries: 1
-prompt:
-  file: ./prompts/handnote.md
 maxSteps: 18
 maxInspectCalls: 3
 width: 1600
 toolMedia:
   maxEdge: 2048
   jpegQuality: 85
-theme: clean
-fontFamily: sans-serif
 saveIntermediateImages: true
 ```
 
-`timeoutMs`, `maxRetries`, `maxSteps`, `maxInspectCalls`, `width`, `toolMedia`, `theme`, `fontFamily`, and `saveIntermediateImages` may be omitted to use those shown defaults. `timeoutMs` covers the complete Provider response stream. The first release accepts only `clean` and `sans-serif`. Tool images are deterministically converted to bounded JPEG previews for model input; retained inspection and render artifacts remain PNG. Identical inspections are reused within a run, while the unique-call budget prevents inspection loops from consuming the document, review, and finalization steps.
+`timeoutMs`, `maxRetries`, `maxSteps`, `maxInspectCalls`, `width`, `toolMedia`, and `saveIntermediateImages` may be omitted to use those shown defaults. `timeoutMs` covers the complete Provider response stream. Tool images are deterministically converted to bounded JPEG previews for model input; retained inspection and render artifacts remain PNG. Identical inspections are reused within a run, while the unique-call budget prevents inspection loops from consuming the document, review, and finalization steps.
 
 ## Run
 
@@ -119,7 +115,7 @@ An append or flush failure disables that recorder: subsequent event writes repor
 
 ## Development
 
-Application code lives in `src`, with internal Agent, Ink, Renderer, run storage and tool modules. The CLI is `src/cli.ts`; maintained evaluation entries live in `scripts`, and offline behavior tests live in `tests`. Dependencies are managed by one private package. `prompts/handnote.md` retains the configurable prompt path during prompt migration.
+Application code lives in `src`, with internal Agent, Ink, Renderer, run storage and tool modules. The CLI is `src/cli.ts`; maintained evaluation entries live in `scripts`, and offline behavior tests live in `tests`. Dependencies are managed by one private package. Prompts are application-owned Markdown resources in `src/prompt`, resolved independently of the working directory.
 
 ```sh
 bun test
@@ -134,3 +130,5 @@ Tests are offline and must not call a real Provider. The MVP intentionally omits
 ### Full-page ink evaluation
 
 `bun run eval:ink:full -- --output <new-directory> --config config.yaml --pages 2,69,70` runs the pinned development pages through the application. It saves source and material evidence, categorized model usage, per-attempt request measurements, and model-facing tool text/image measurements. Missing historical measurements remain absent. This command calls the configured provider; offline tests inject a model.
+
+Prompts and rendering style are maintained with the application. Configuration fields `prompt`, `theme`, and `fontFamily` are no longer accepted; remove them from existing YAML files. The model start event records the SHA-256 of the actual assembled instructions.

@@ -40,17 +40,12 @@ const config: HandnoteConfig = {
     timeoutMs: 1_000,
     maxRetries: 0,
   },
-  prompt: { file: "prompt.md" },
   maxSteps: 3,
   maxInspectCalls: 3,
   width: 700,
   toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-  theme: "clean",
-  fontFamily: "sans-serif",
   saveIntermediateImages: true,
   configPath: `${directory}/config.yaml`,
-  promptPath: `${directory}/prompt.md`,
-  promptText: "Use the tools.",
 };
 try {
   await runAgent({

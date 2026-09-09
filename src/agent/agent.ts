@@ -1,11 +1,11 @@
 import type { LanguageModelV4 } from "@ai-sdk/provider";
 import { Agent } from "@mastra/core/agent";
+import { loadPrompt } from "../prompt/index.ts";
 import { AgentError, safeErrorMetadata } from "./agent-errors.ts";
 import type { AgentDiagnosticSink, ModelEventSink } from "./agent-events.ts";
 import { AgentErrorLogger } from "./agent-logger.ts";
 import type { HandnoteToolHandlers } from "./agent-protocol.ts";
 import { createAgentTools } from "./agent-tools.ts";
-import { inkPrompt } from "./ink-prompt.ts";
 import { classifyProviderError, createModel } from "./provider/index.ts";
 import type { ModelConfig } from "./provider/types.ts";
 import { RunState } from "./state.ts";
@@ -21,7 +21,6 @@ export interface AgentRunResult {
 export async function runAgent(options: {
   config: {
     model: ModelConfig;
-    promptText: string;
     maxSteps: number;
     maxInspectCalls: number;
   };
@@ -31,13 +30,15 @@ export async function runAgent(options: {
   onDiagnostic: AgentDiagnosticSink;
   model?: LanguageModelV4;
 }): Promise<AgentRunResult> {
+  const prompt = await loadPrompt(
+    options.handlers.ink ? "ink" : "transcription",
+  );
   const state = new RunState(options.onModelEvent);
   let acceptingCallbacks = true;
   const agent = new Agent({
     id: "handnote-agent",
     name: "Handnote Agent",
-    instructions:
-      options.config.promptText + (options.handlers.ink ? inkPrompt : ""),
+    instructions: prompt.text,
     model:
       options.model ?? createModel({ config: options.config.model, state }),
     tools: createAgentTools({
@@ -68,7 +69,7 @@ export async function runAgent(options: {
   );
   await state.emit({
     type: "model.run.started",
-    data: { maxSteps: options.config.maxSteps },
+    data: { maxSteps: options.config.maxSteps, promptSha256: prompt.sha256 },
   });
   try {
     const result = await agent.generate(

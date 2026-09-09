@@ -98,7 +98,6 @@ const result = await runAgent({
       timeoutMs: 1_000,
       maxRetries: 0,
     },
-    promptText: "Use the tools.",
     maxSteps: 8,
     maxInspectCalls: 1,
   },

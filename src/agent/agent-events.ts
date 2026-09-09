@@ -15,7 +15,7 @@ export interface ModelRequestFingerprint {
 }
 
 interface ModelEventData {
-  "model.run.started": { maxSteps: number };
+  "model.run.started": { maxSteps: number; promptSha256: string };
   "model.attempt.started": {
     step: number;
     attempt: number;

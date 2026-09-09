@@ -51,12 +51,10 @@ test("experiment sources contain only pinned development inputs and reject holdo
 test("a stopped offline experiment keeps source, usage and failure evidence without claiming acceptance or overwriting", async () => {
   const directory = await temporary();
   const output = `${directory}/experiment`;
-  const prompt = `${directory}/prompt.md`;
-  await writeFile(prompt, "Use the tools.");
   const configPath = `${directory}/config.yaml`;
   await writeFile(
     configPath,
-    `model:\n  provider: openai-compatible\n  baseUrl: https://offline.invalid/v1\n  apiKey: offline-experiment-secret\n  name: offline\nprompt:\n  file: ${prompt}\nmaxSteps: 3\n`,
+    `model:\n  provider: openai-compatible\n  baseUrl: https://offline.invalid/v1\n  apiKey: offline-experiment-secret\n  name: offline\nmaxSteps: 3\n`,
   );
   const model = new MockLanguageModelV3({
     modelId: "offline",

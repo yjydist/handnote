@@ -1,8 +1,8 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { inkPrompt } from "../src/agent/ink-prompt.ts";
 import { loadConfig } from "../src/config.ts";
+import { loadPrompt } from "../src/prompt/index.ts";
 import { safeErrorMetadata } from "../src/run/errors.ts";
 import { loadInkLibrary } from "../src/run/ink-assets.ts";
 import type { RunResult } from "../src/run/manifest.ts";
@@ -200,7 +200,7 @@ export async function runFullPageExperiment(options: {
       lockSha256: await sha256File(resolve(root, "bun.lock")),
     },
     model: { provider: config.model.provider, name: config.model.name },
-    promptSha256: sha256(config.promptText + inkPrompt),
+    promptSha256: (await loadPrompt("ink")).sha256,
     configPath: configured.configPath,
   };
   await writeFile(

@@ -6,6 +6,7 @@ import { basename, extname, resolve } from "node:path";
 import { Command } from "commander";
 import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
+import { loadPrompt } from "../src/prompt/index.ts";
 import type { RunResult } from "../src/run/manifest.ts";
 import { compileNoteMarkdown } from "../src/run/markdown.ts";
 import { isRedactedCredential } from "../src/run/redact.ts";
@@ -594,9 +595,7 @@ export async function main(argv = process.argv): Promise<number> {
       maxSteps: config.maxSteps,
       maxInspectCalls: config.maxInspectCalls,
       width: config.width,
-      promptSha256: createHash("sha256")
-        .update(config.promptText)
-        .digest("hex"),
+      promptSha256: (await loadPrompt("transcription")).sha256,
     };
     const report: EvalReport = {
       generatedAt: new Date().toISOString(),

@@ -223,7 +223,6 @@ test("offline model sees real media and rendered table counts before and after r
         timeoutMs: 1000,
         maxRetries: 0,
       },
-      promptText: "Use tools.",
       maxSteps: 10,
       maxInspectCalls: 3,
     },

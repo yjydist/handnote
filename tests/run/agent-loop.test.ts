@@ -78,17 +78,12 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
       timeoutMs: 1_000,
       maxRetries: 0,
     },
-    prompt: { file: "prompt.md" },
     maxSteps: 10,
     maxInspectCalls: 3,
     width: 700,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-    theme: "clean",
-    fontFamily: "sans-serif",
     saveIntermediateImages: true,
     configPath: `${directory}/config.yaml`,
-    promptPath: `${directory}/prompt.md`,
-    promptText: "Use the tools.",
   };
   const result = await runAgent({
     config,

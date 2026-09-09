@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { loadConfig } from "../../src/config.ts";
+import { loadPrompt } from "../../src/prompt/index.ts";
 import {
   createUniqueDirectory,
   safeStem,
@@ -23,13 +24,11 @@ afterEach(async () => {
 });
 
 describe("configuration", () => {
-  test("loads defaults, direct API key, and prompt relative to config", async () => {
+  test("loads defaults and direct API key without an external prompt", async () => {
     const directory = await temporary();
-    await mkdir(`${directory}/text`);
-    await writeFile(`${directory}/text/prompt.md`, "follow evidence");
     await writeFile(
       `${directory}/handnote.yaml`,
-      "model:\n  baseUrl: https://example.test/v1\n  apiKey: secret\n  name: vision\nprompt:\n  file: ./text/prompt.md\n",
+      "model:\n  baseUrl: https://example.test/v1\n  apiKey: secret\n  name: vision\n",
     );
     const config = await loadConfig(`${directory}/handnote.yaml`);
     expect(config.maxSteps).toBe(18);
@@ -38,27 +37,33 @@ describe("configuration", () => {
     expect(config.model.maxRetries).toBe(1);
     expect(config.model.timeoutMs).toBe(240_000);
     expect(config.toolMedia).toEqual({ maxEdge: 2048, jpegQuality: 85 });
-    expect(config.promptPath).toBe(`${directory}/text/prompt.md`);
+    expect(config).not.toHaveProperty("prompt");
+    expect(config).not.toHaveProperty("promptText");
     expect(config.model.apiKey).toBe("secret");
   });
 
-  test("rejects unknown and version fields", async () => {
+  test.each([
+    "version: 1",
+    "prompt:\n  file: prompt.md",
+    "theme: clean",
+    "fontFamily: sans-serif",
+  ])("rejects unsupported configuration: %s", async (field) => {
     const directory = await temporary();
-    await writeFile(`${directory}/prompt.md`, "x");
     await writeFile(
       `${directory}/bad.yaml`,
-      "version: 1\nmodel:\n  baseUrl: https://example.test/v1\n  apiKey: secret\n  name: v\nprompt:\n  file: prompt.md\n",
+      `model:\n  baseUrl: https://example.test/v1\n  apiKey: secret\n  name: v\n${field}\n`,
     );
     expect(loadConfig(`${directory}/bad.yaml`)).rejects.toThrow(
       "Unrecognized key",
     );
+    if (!field.startsWith("version"))
+      expect(loadConfig(`${directory}/bad.yaml`)).rejects.toThrow(
+        "prompts and presentation are managed by Handnote",
+      );
   });
 
   test("production prompt enforces faithful content and session-only audit", async () => {
-    const prompt = await readFile(
-      new URL("../../prompts/handnote.md", import.meta.url),
-      "utf8",
-    );
+    const { text: prompt } = await loadPrompt("transcription");
     expect(prompt).toContain("never summarize, compress, omit, evaluate");
     expect(prompt).toContain("only when that title is explicitly written");
     expect(prompt).toContain("Never use a callout to hold omitted");

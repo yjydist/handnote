@@ -1,4 +1,5 @@
 export type AgentErrorKind =
+  | "internal"
   | "validation"
   | "authentication"
   | "provider_rejected"

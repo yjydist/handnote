@@ -1,4 +1,4 @@
-export const inkPrompt = `
+
 ## Original-trajectory mode
 
 For this run, the following rules replace the electronic-transcription preference, Mermaid reconstruction preference, crop-only image rule and shared image-coordinate rule above. Other source-faithfulness and revision rules still apply.
@@ -26,4 +26,3 @@ review_render supplies actual outputs at 360, 720, 1200 and 1600 pixels. Compare
 A passing layout check only proves that geometry fits. Before finalize, visually check complete characters at EVERY wrap, annotation-to-text alignment, grouping marks, relative text size, and every meaningful source item. Compare the rendered strokes themselves, not the optional transcription. Missing or displaced strokes and broken visual relationships require a revision even when reviewed:true and there are no layout warnings.
 
 inspect_source coordinates belong to the original image; inspect_ink regions belong to the full redraw. The exact points-to-redraw transform is supplied. Original-image-to-points mapping is unknown; do not guess from dimensions.
-`;

@@ -11,6 +11,7 @@ import {
   parseInkJson,
   renderInkSvg,
 } from "../../src/ink/index.ts";
+import { loadPrompt } from "../../src/prompt/index.ts";
 import {
   executePreparedRun,
   type PreparedRunOptions,
@@ -64,17 +65,11 @@ test.each(["complete", "partial", "failed"] as const)(
         timeoutMs: 1000,
         maxRetries: 0,
       },
-      prompt: { file: "prepared.md" },
-      promptPath: `${directory}/prepared.md`,
       configPath: `${directory}/prepared.yaml`,
-      promptText:
-        "Use the prepared ink tools and review every required width before finalization.",
       maxSteps: 8,
       maxInspectCalls: 3,
       width: 720,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-      theme: "clean",
-      fontFamily: "sans-serif",
       saveIntermediateImages: true,
     };
     const presentation = { kind: "text" as const, referenceHeight: 22 };
@@ -190,9 +185,17 @@ test.each(["complete", "partial", "failed"] as const)(
       (await readdir(stored.path("session/model-previews"))).length,
     ).toBeGreaterThan(0);
     const session = await readFile(stored.path("session/events.jsonl"), "utf8");
+    const prompt = await loadPrompt("ink");
+    expect(session).not.toContain("PROMPT_RECORDED_BY_HASH");
+    expect(session).not.toContain(JSON.stringify(prompt.text));
     expect(session).not.toContain(config.model.apiKey);
     expect(session).not.toMatch(/[A-Za-z0-9+/]{512,}={0,2}/);
     const events = readSession(stored.path("session/events.jsonl")).events;
+    expect(
+      events.find((event) => event.type === "model.run.started")?.data,
+    ).toMatchObject({
+      promptSha256: prompt.sha256,
+    });
     expect(events.at(-1)).toMatchObject({
       type: "run.finished",
       data: { status: outcome },

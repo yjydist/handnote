@@ -12,6 +12,7 @@ import {
   repairToolArgumentResponse,
 } from "../../src/agent/provider/index.ts";
 import { RunState } from "../../src/agent/state.ts";
+import { loadPrompt } from "../../src/prompt/index.ts";
 
 function deferred() {
   let resolve = () => {};
@@ -64,6 +65,7 @@ function scriptedAgent() {
     },
   });
   return {
+    model,
     requests: () => requests,
     options: {
       config: {
@@ -75,7 +77,6 @@ function scriptedAgent() {
           timeoutMs: 1_000,
           maxRetries: 0,
         },
-        promptText: "Use the tools.",
         maxSteps: 3,
         maxInspectCalls: 1,
       },
@@ -88,6 +89,29 @@ function scriptedAgent() {
     },
   };
 }
+
+test("the recorded prompt hash identifies the internal instructions sent to the model", async () => {
+  const script = scriptedAgent();
+  const prompt = await loadPrompt("transcription");
+  const events: ModelEvent[] = [];
+  await runAgent({
+    ...script.options,
+    onModelEvent: async (event) => {
+      events.push(event);
+    },
+  });
+  expect(
+    script.model.doGenerateCalls[0]?.prompt.find(
+      (message) => message.role === "system",
+    )?.content,
+  ).toBe(prompt.text);
+  expect(
+    events.find((event) => event.type === "model.run.started")?.data,
+  ).toEqual({
+    maxSteps: 3,
+    promptSha256: prompt.sha256,
+  });
+});
 
 test("transport waits for the attempt accounting event before contacting the provider", async () => {
   const entered = deferred();

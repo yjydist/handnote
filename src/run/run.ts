@@ -152,7 +152,7 @@ export async function executePreparedRun(
     recorder.record("run.started", {
       runId: store.manifest.runId,
       input: input.path,
-      config: { ...config, promptText: "[PROMPT_RECORDED_BY_HASH]" },
+      config,
     });
     try {
       await store.copyInput(input.path);
@@ -173,15 +173,12 @@ export async function executePreparedRun(
         onModelEvent: async (event) => {
           // Keep known usage even when recording its completed-step event fails.
           modelAccounting = event.accounting;
-          recorder.record(
-            event.type,
-            event.type === "model.run.started"
-              ? {
-                  ...event.data,
-                  source: await recorder.media(sourcePath, input.mimeType),
-                }
-              : event.data,
-          );
+          if (event.type === "model.run.started")
+            recorder.recordModelRunStarted({
+              ...event.data,
+              source: await recorder.media(sourcePath, input.mimeType),
+            });
+          else recorder.record(event.type, event.data);
           if (
             event.type === "model.attempt.started" ||
             event.type === "model.step.completed"

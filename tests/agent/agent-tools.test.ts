@@ -7,6 +7,7 @@ import {
 } from "../../src/agent/agent-protocol.ts";
 import { createAgentTools } from "../../src/agent/agent-tools.ts";
 import { runAgent } from "../../src/agent/index.ts";
+import { loadPrompt } from "../../src/prompt/index.ts";
 
 function setup(overrides: Partial<HandnoteToolHandlers>) {
   const unexpected = async (): Promise<never> => {
@@ -317,8 +318,12 @@ test("an offline model sees the malformed ink call error and retries valid JSON"
     }),
   };
   let calls = 0;
+  const inkPrompt = await loadPrompt("ink");
   const model = new MockLanguageModelV3({
     doGenerate: async ({ prompt }) => {
+      expect(prompt.find((message) => message.role === "system")?.content).toBe(
+        inkPrompt.text,
+      );
       calls++;
       if (calls > 3) throw new Error("Unexpected model continuation");
       if (calls === 2) {
@@ -364,7 +369,6 @@ test("an offline model sees the malformed ink call error and retries valid JSON"
         timeoutMs: 1000,
         maxRetries: 0,
       },
-      promptText: "Use the ink tools.",
       maxSteps: 4,
       maxInspectCalls: 1,
     },
@@ -373,7 +377,10 @@ test("an offline model sees the malformed ink call error and retries valid JSON"
     model: model as unknown as NonNullable<
       Parameters<typeof runAgent>[0]["model"]
     >,
-    onModelEvent: async () => undefined,
+    onModelEvent: async (event) => {
+      if (event.type === "model.run.started")
+        expect(event.data.promptSha256).toBe(inkPrompt.sha256);
+    },
     onDiagnostic: () => undefined,
   });
   expect(result.steps).toBe(3);
