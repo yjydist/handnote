@@ -79,6 +79,10 @@ export function createReviewRenderHandler(
               })),
             );
             const reviewed = !warnings.some((warning) => warning.blocking);
+            const usage = note.inkUsage;
+            const coverage = usage
+              ? `Ink source coverage: ${usage.usedStrokeIndices.length}/${usage.usedStrokeIndices.length + usage.unusedStrokeIndices.length} used; unusedStrokeIndices=${JSON.stringify(usage.unusedStrokeIndices)}. Check every unused stroke against the source image; select meaningful content that is missing or accurately record why it is omitted in the ink audit. Unused strokes are coverage facts, not automatic defects; using every stroke is not required.`
+              : "";
             const evidence = {
               revision: revision.number,
               dependenciesSha256: revision.dependenciesSha256,
@@ -101,7 +105,7 @@ export function createReviewRenderHandler(
               warnings,
               structure: revision.structure,
               reviewed,
-              summary: `Review revision ${revision.number}; views in order: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. ${reviewed ? "Compare every view with the complete source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} Judgment: pending-human-review.`,
+              summary: `Review revision ${revision.number}; views in order: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. ${reviewed ? "Compare every view with the complete source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} ${coverage} Judgment: pending-human-review.`,
             };
             if (!reviewed) throw new BlockedInkReview(inkOutput);
             return;

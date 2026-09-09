@@ -145,15 +145,7 @@ test("offline model sees real media through inspect, select, compose, write, rev
       name: "write_note",
       input: {
         markdown,
-        audit: {
-          ...audit,
-          ink: {
-            ...audit.ink,
-            omissions: [
-              { strokeIndices: [2], reason: "Awaiting source comparison" },
-            ],
-          },
-        },
+        audit,
       },
     },
     { name: "review_render", input: {} },
@@ -173,6 +165,7 @@ test("offline model sees real media through inspect, select, compose, write, rev
     doGenerate: async () => {
       const item = script[call++];
       if (!item) throw new Error("Unexpected extra call");
+      if (call === 6) expect(store.manifest.reviewedRevision?.number).toBe(1);
       if (call === 7) expect(store.manifest.reviewedRevision).toBeUndefined();
       return {
         content: [
@@ -226,6 +219,25 @@ test("offline model sees real media through inspect, select, compose, write, rev
   expect(seen).toContain(composed.id);
   expect(seen).toContain("pending-human-review");
   expect(seen).toContain("360×");
+  const firstReview = JSON.stringify(
+    model.doGenerateCalls[5]?.prompt.filter(
+      (message) => message.role === "tool",
+    ),
+    (key, value) => (key === "data" ? "[media]" : value),
+  );
+  expect(firstReview).toContain(
+    "Ink source coverage: 2/3 used; unusedStrokeIndices=[2]",
+  );
+  expect(firstReview).toContain(
+    "Check every unused stroke against the source image",
+  );
+  expect(firstReview).toContain(
+    "accurately record why it is omitted in the ink audit",
+  );
+  expect(firstReview).toContain("using every stroke is not required");
+  expect(seen).toContain(
+    "Ink source coverage: 3/3 used; unusedStrokeIndices=[]",
+  );
   const events = readSession(store.path("session/events.jsonl")).events;
   const last = events
     .filter((event) => event.type === "document.revision.committed")
@@ -277,6 +289,9 @@ test("360 overflow returns actual previews and asset ID without authorizing fina
   if (!review.ok) throw new Error("Missing preview");
   expect(review.paths).toHaveLength(4);
   expect(review.summary).toContain(asset.id);
+  expect(review.summary).toContain(
+    "Ink source coverage: 1/3 used; unusedStrokeIndices=[1,2]",
+  );
   expect((await handlers.prepareModelMedia("review_render", review)).kind).toBe(
     "previews",
   );
