@@ -34,4 +34,4 @@ bun experiments/ink/review-cases.ts --prepared runs/ink-experiments/my-input --a
 
 普通应用在 `apps/handnote`，仍通过根兼容入口工作。模型循环归 `@handnote/agent`，渲染与笔迹分别由 `@handnote/renderer`、`@handnote/ink` 提供；来源匹配通过应用的 `@handnote/app/ink-matching` 入口调用。图片授权、资产哈希与 run 事务仍由应用管理。自动匹配是开发实验，未接入正式 `--ink`，未升级生产存储格式。
 
-首轮实测见 [RESULTS.md](RESULTS.md)；第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配，覆盖可能进一步下降。
+首轮实测见 [RESULTS.md](RESULTS.md)，第二轮实测、验证与提交记录见 [RESULTS-round2.md](RESULTS-round2.md)。第二轮保留相同源文件、摘录及片段选择，使用严格完整句段匹配；第 70 页自动覆盖从 2/30 降为 0/30，所有结果仍待人工核验。
