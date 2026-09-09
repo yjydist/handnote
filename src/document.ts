@@ -1,18 +1,7 @@
 import { z } from "zod";
-export const regionSchema = z
-  .object({
-    x: z.number().min(0).max(1),
-    y: z.number().min(0).max(1),
-    width: z.number().positive().max(1),
-    height: z.number().positive().max(1),
-  })
-  .strict()
-  .refine(
-    (r) => r.x + r.width <= 1 && r.y + r.height <= 1,
-    "Region exceeds normalized image bounds",
-  );
+import { regionSchema } from "./agent-protocol.ts";
 
-export type Region = z.infer<typeof regionSchema>;
+export { type Region, regionSchema } from "./agent-protocol.ts";
 
 const idSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
 

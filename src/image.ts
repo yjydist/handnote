@@ -1,42 +1,26 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
 import sharp from "sharp";
-import { z } from "zod";
+import {
+  type CaptureFigureRequest,
+  captureFigureInputSchema,
+  type InspectRequest,
+  inspectInputSchema,
+} from "./agent-protocol.ts";
+
+export {
+  type CaptureFigureRequest,
+  captureFigureInputSchema,
+  type InspectRequest,
+  inspectInputSchema,
+} from "./agent-protocol.ts";
+
 import { type Region, regionSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 
-const inspectEnhancementSchema = z.enum([
-  "original",
-  "grayscale",
-  "contrast",
-  "sharpen",
-  "binarize",
-]);
-const inspectScaleSchema = z.number().min(1).max(4);
-const inspectRegionSchema = z
-  .object({
-    x: z.number().min(0).lt(1),
-    y: z.number().min(0).lt(1),
-    width: z.number().positive().max(1),
-    height: z.number().positive().max(1),
-    scale: inspectScaleSchema.optional(),
-    enhancement: inspectEnhancementSchema.optional(),
-  })
-  .strict();
-
-export const inspectInputSchema = z
-  .object({
-    regions: z.array(inspectRegionSchema).min(1).max(8),
-    scale: inspectScaleSchema.optional(),
-    enhancement: inspectEnhancementSchema.optional(),
-  })
-  .strict();
-
-export type InspectRequest = z.infer<typeof inspectInputSchema>;
-
 export interface InspectRegion extends Region {
   scale: number;
-  enhancement: z.infer<typeof inspectEnhancementSchema>;
+  enhancement: NonNullable<InspectRequest["enhancement"]>;
 }
 
 export interface InspectInput {
@@ -235,12 +219,6 @@ function enhance(
   if (mode === "binarize") return pipeline.grayscale().threshold();
   return pipeline;
 }
-
-export const captureFigureInputSchema = z
-  .object({ region: regionSchema })
-  .strict();
-
-export type CaptureFigureRequest = z.infer<typeof captureFigureInputSchema>;
 
 export async function captureFigure(
   source: string,

@@ -1,28 +1,14 @@
-import { z } from "zod";
+import type {
+  HandnoteToolHandlers,
+  ToolExecutionContext,
+} from "../agent-protocol.ts";
 import { asError, HandnoteError } from "../errors.ts";
 import { createModelPreviews } from "../image.ts";
 
 import type { ToolContext } from "./types.ts";
 
-export const toolErrorSchema = z.object({
-  ok: z.literal(false),
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-    repairable: z.literal(true),
-  }),
-});
-
-export const toolError = (
-  code: string,
-  message: string,
-): z.infer<typeof toolErrorSchema> => ({
-  ok: false,
-  error: { code, message, repairable: true },
-});
-
-export function remainingSteps(context: ToolContext): string {
-  const remaining = Math.max(0, context.maxSteps - context.state.modelStep);
+export function remainingSteps(context: ToolExecutionContext): string {
+  const remaining = context.remainingSteps;
   return `${remaining} model step(s) remain after this one`;
 }
 
@@ -44,20 +30,7 @@ export function layoutSummary(
     .join("; ")}`;
 }
 
-export interface ToolRuntime {
-  fatal(error: unknown): never;
-  mediaOutputWithFatal(
-    purpose: "inspect_source" | "review_render" | "capture_figure",
-    output: {
-      ok: boolean;
-      path?: string | undefined;
-      mimeType?: string | undefined;
-      summary?: string | undefined;
-    },
-  ): Promise<{ type: string; value: unknown }>;
-}
-
-export function createToolRuntime(context: ToolContext): ToolRuntime {
+export function createToolRuntime(context: ToolContext) {
   const fatal = (error: unknown): never => {
     const value =
       error instanceof HandnoteError
@@ -68,47 +41,33 @@ export function createToolRuntime(context: ToolContext): ToolRuntime {
     context.state.fail(value);
     throw value;
   };
-  const mediaOutputWithFatal: ToolRuntime["mediaOutputWithFatal"] = async (
+  const prepareModelMedia: HandnoteToolHandlers["prepareModelMedia"] = async (
     purpose,
     output,
   ) => {
-    try {
-      if (!output.ok || !output.path)
-        return { type: "text", value: output.summary ?? "Tool failed" };
-      if (purpose === "review_render") await context.store.readRevision();
-      const previews = await createModelPreviews(
+    if (!output.ok || !output.path)
+      return { kind: "text", text: output.summary ?? "Tool failed" };
+    if (purpose === "review_render") await context.store.readRevision();
+    const previews = await createModelPreviews(output.path, context.toolMedia);
+    context.recorder.record("tool.model_media.prepared", {
+      purpose,
+      cacheHit: false,
+      source: await context.recorder.media(
         output.path,
-        context.toolMedia,
-      );
-      context.recorder.record("tool.model_media.prepared", {
-        purpose,
-        cacheHit: false,
-        source: await context.recorder.media(
-          output.path,
-          output.mimeType ?? "image/png",
-        ),
-        previews: previews.map(({ data: _data, ...preview }) => preview),
-      });
-      return {
-        type: "content",
-        value: [
-          { type: "text", text: output.summary ?? "Image result" },
-          ...previews.flatMap((preview, index) => [
-            {
-              type: "text" as const,
-              text: `Preview ${index + 1}/${previews.length} ${preview.width}×${preview.height}`,
-            },
-            {
-              type: "image-data" as const,
-              data: preview.data,
-              mediaType: preview.mediaType,
-            },
-          ]),
-        ],
-      };
-    } catch (error) {
-      return fatal(error);
-    }
+        output.mimeType ?? "image/png",
+      ),
+      previews: previews.map(({ data: _data, ...preview }) => preview),
+    });
+    return {
+      kind: "previews",
+      summary: output.summary ?? "Image result",
+      previews: previews.map(({ data, mediaType, width, height }) => ({
+        data,
+        mediaType,
+        width,
+        height,
+      })),
+    };
   };
-  return { fatal, mediaOutputWithFatal };
+  return { fatal, prepareModelMedia };
 }
