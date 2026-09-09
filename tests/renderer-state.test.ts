@@ -8,11 +8,11 @@ import { chromium } from "playwright";
 import sharp from "sharp";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import { isAllowedRenderRequest, renderDocument } from "../src/renderer.ts";
-import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
 import {
   createStoreFixture,
+  createTestHandlers,
   fullRegion,
+  ModelSteps,
   simpleDraft,
   simpleMarkdown,
 } from "./helpers.ts";
@@ -264,8 +264,8 @@ ${figureMarkdown}
     const markdown = draft.markdown.replace("# 测试笔记\n\n## 第一节\n\n", "");
     const store = await createStoreFixture(directory);
     const recorder = store.recorder;
-    const state = new RunState();
-    const tools = createHandnoteTools({
+    const state = new ModelSteps();
+    const tools = createTestHandlers({
       store,
       sourcePath: `${directory}/source.png`,
       width: 700,
@@ -275,7 +275,7 @@ ${figureMarkdown}
       state,
       recorder,
     });
-    const execute = tools.write_note.execute;
+    const execute = tools.write_note;
     if (!execute) throw new Error("missing write_note execute");
     const result = await execute(
       {

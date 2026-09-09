@@ -1,7 +1,7 @@
+import { regionSchema } from "@handnote/agent";
 import { z } from "zod";
-import { regionSchema } from "./agent-protocol.ts";
 
-export { type Region, regionSchema } from "./agent-protocol.ts";
+export { type Region, regionSchema } from "@handnote/agent";
 
 const idSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/);
 

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
-import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
-import { createStoreFixture } from "./helpers.ts";
+import {
+  createStoreFixture,
+  createTestHandlers,
+  ModelSteps,
+} from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -31,17 +33,17 @@ describe("capture_figure tool", () => {
       .toFile(source);
     const store = await createStoreFixture(directory);
     const recorder = store.recorder;
-    const tools = createHandnoteTools({
+    const tools = createTestHandlers({
       store,
       sourcePath: source,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-      state: new RunState(),
+      state: new ModelSteps(),
       recorder,
     });
-    const execute = tools.capture_figure.execute;
+    const execute = tools.capture_figure;
     if (!execute) throw new Error("missing capture_figure execute");
     const context = {} as Parameters<typeof execute>[1];
     const region = { x: 0.25, y: 0.5, width: 0.5, height: 0.25 };
@@ -86,42 +88,12 @@ describe("capture_figure tool", () => {
     ).toBe(false);
   });
 
-  test("rejects out-of-bounds regions through the schema", async () => {
-    const directory = await temporary();
-    const source = `${directory}/original.png`;
-    await sharp({
-      create: { width: 100, height: 100, channels: 3, background: "white" },
-    })
-      .png()
-      .toFile(source);
-    const store = await createStoreFixture(directory);
-    const tools = createHandnoteTools({
-      store,
-      sourcePath: source,
-      width: 700,
-      maxSteps: 18,
-      maxInspectCalls: 3,
-      toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-      state: new RunState(),
-      recorder: store.recorder,
-    });
-    const execute = tools.capture_figure.execute;
-    if (!execute) throw new Error("missing capture_figure execute");
-    const rejected = await execute(
-      { region: { x: 0.5, y: 0, width: 0.6, height: 1 } },
-      {} as Parameters<typeof execute>[1],
-    );
-    expect(JSON.stringify(rejected)).toContain(
-      "Region exceeds normalized image bounds",
-    );
-  });
-
-  test("classifies every shared failure, clears the cache, and permits retry", async () => {
+  test("shares failures, clears the cache, and permits retry", async () => {
     const directory = await temporary();
     const source = `${directory}/missing.png`;
-    const state = new RunState();
+    const state = new ModelSteps();
     const store = await createStoreFixture(directory);
-    const tools = createHandnoteTools({
+    const tools = createTestHandlers({
       store,
       sourcePath: source,
       width: 700,
@@ -131,7 +103,7 @@ describe("capture_figure tool", () => {
       state,
       recorder: store.recorder,
     });
-    const execute = tools.capture_figure.execute;
+    const execute = tools.capture_figure;
     if (!execute) throw new Error("missing capture_figure execute");
     const context = {} as Parameters<typeof execute>[1];
     const input = { region: { x: 0, y: 0, width: 1, height: 1 } };
@@ -143,9 +115,9 @@ describe("capture_figure tool", () => {
     for (const failure of failures) {
       expect(failure.status).toBe("rejected");
       if (failure.status === "rejected")
-        expect(failure.reason).toMatchObject({ kind: "internal" });
+        expect(failure.reason).toBeInstanceOf(Error);
     }
-    expect(state.fatalError).toMatchObject({ kind: "internal" });
+    expect(failures[0]).toEqual(failures[1]);
 
     await sharp({
       create: { width: 20, height: 10, channels: 3, background: "white" },

@@ -16,29 +16,29 @@
     "eval:ink:auto": "bun experiments/ink/automatic.ts"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.35",
-    "@mastra/core": "1.61.0",
-    "ai": "7.0.77",
     "commander": "15.0.0",
     "playwright": "1.62.0",
     "sharp": "0.35.0",
     "yaml": "2.8.1",
     "zod": "4.1.12",
     "@handnote/renderer": "workspace:*",
-    "@ai-sdk/provider": "4.0.7",
-    "@handnote/ink": "workspace:*"
+    "@handnote/ink": "workspace:*",
+    "@handnote/agent": "workspace:*"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.4",
     "@types/bun": "1.2.21",
     "@types/hast": "3.0.5",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "ai": "7.0.77",
+    "@ai-sdk/provider": "4.0.7"
   },
   "engines": {
     "bun": ">=1.4.0 <1.5.0"
   },
   "workspaces": [
     "packages/renderer",
-    "packages/ink"
+    "packages/ink",
+    "packages/agent"
   ]
 }

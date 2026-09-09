@@ -1,14 +1,12 @@
 import { constants } from "node:fs";
 import { access, readdir, readFile, rm } from "node:fs/promises";
 import { basename, extname, relative, resolve } from "node:path";
+import { AgentError, createModelAccounting, runAgent } from "@handnote/agent";
 import sharp from "sharp";
-import { runAgent } from "./agent.ts";
-import { AgentError } from "./agent-errors.ts";
 import { loadConfig } from "./config.ts";
 import { asError, HandnoteError, safeErrorMetadata } from "./errors.ts";
 import { displayMetadata } from "./image.ts";
 import type { RunResult } from "./manifest.ts";
-import { createModelAccounting } from "./model-accounting.ts";
 import { checkedRunPath } from "./run-path.ts";
 import type { SessionRecorder } from "./session.ts";
 import { RunStore } from "./store.ts";
@@ -138,7 +136,6 @@ export async function executeRun(
         store,
         sourcePath,
         width: config.width,
-        maxSteps: config.maxSteps,
         maxInspectCalls: config.maxInspectCalls,
         toolMedia: config.toolMedia,
         recorder,

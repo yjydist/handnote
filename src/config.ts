@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { modelConfigSchema } from "@handnote/agent";
 import YAML from "yaml";
 import { z } from "zod";
 import { HandnoteError } from "./errors.ts";
-import { modelConfigSchema } from "./provider/types.ts";
 
 const rawConfigSchema = z
   .object({

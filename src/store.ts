@@ -11,6 +11,11 @@ import {
 } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import {
+  accountModelAttempt,
+  accountModelStep,
+  createModelAccounting,
+} from "@handnote/agent";
 import { revisionDraftSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";
 import {
@@ -21,11 +26,6 @@ import {
   summarizeUsage,
 } from "./manifest.ts";
 import { compileNoteMarkdown } from "./markdown.ts";
-import {
-  accountModelAttempt,
-  accountModelStep,
-  createModelAccounting,
-} from "./model-accounting.ts";
 import type { RedactionOptions } from "./redact.ts";
 import { renderDocument } from "./renderer.ts";
 import { checkedRunPath } from "./run-path.ts";

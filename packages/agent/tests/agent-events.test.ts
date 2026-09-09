@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
+import type { ModelEvent } from "@handnote/agent";
+import {
+  type HandnoteToolHandlers,
+  runAgent,
+  toolError,
+} from "@handnote/agent";
 import { MockLanguageModelV3 } from "ai/test";
-import { runAgent } from "../src/agent.ts";
-import type { ModelEvent } from "../src/agent-events.ts";
 import { AgentErrorLogger } from "../src/agent-logger.ts";
-import { type HandnoteToolHandlers, toolError } from "../src/agent-protocol.ts";
 import {
   createRetryingFetch,
   repairToolArgumentResponse,

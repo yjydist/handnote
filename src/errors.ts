@@ -26,4 +26,4 @@ export function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-export { type SafeErrorMetadata, safeErrorMetadata } from "./agent-errors.ts";
+export { type SafeErrorMetadata, safeErrorMetadata } from "@handnote/agent";

@@ -1,7 +1,7 @@
 import type {
   HandnoteToolHandlers,
   ToolExecutionContext,
-} from "../agent-protocol.ts";
+} from "@handnote/agent";
 import { createModelPreviews } from "../image.ts";
 
 import type { ToolContext } from "./types.ts";

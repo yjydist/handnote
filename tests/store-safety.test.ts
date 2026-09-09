@@ -4,10 +4,13 @@ import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname } from "node:path";
 import { readSession, SessionRecorder } from "../src/session.ts";
-import { RunState } from "../src/state.ts";
 import { RunStore } from "../src/store.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
-import { createStoreFixture, simpleDraft } from "./helpers.ts";
+import {
+  createStoreFixture,
+  createTestHandlers,
+  ModelSteps,
+  simpleDraft,
+} from "./helpers.ts";
 
 const directories: string[] = [];
 async function setup() {
@@ -34,18 +37,18 @@ describe("recovery path safety", () => {
         outside,
         store.path(tool === "capture" ? "assets" : "intermediate"),
       );
-      const tools = createHandnoteTools({
+      const tools = createTestHandlers({
         store,
         sourcePath: store.path("input/original.png"),
         width: 700,
         maxSteps: 8,
         maxInspectCalls: 3,
         toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-        state: new RunState(),
+        state: new ModelSteps(),
         recorder: store.recorder,
       });
-      const capture = tools.capture_figure.execute;
-      const inspect = tools.inspect_source.execute;
+      const capture = tools.capture_figure;
+      const inspect = tools.inspect_source;
       if (!capture || !inspect) throw new Error("Missing tool executor");
       const region = { x: 0, y: 0, width: 1, height: 1 };
       await expect(

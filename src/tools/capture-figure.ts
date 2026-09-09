@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import type { HandnoteToolHandlers } from "../agent-protocol.ts";
+import type { HandnoteToolHandlers } from "@handnote/agent";
 import { captureFigure, captureFigureInputSchema } from "../image.ts";
 import type { ToolContext } from "./types.ts";
 

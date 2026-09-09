@@ -1,10 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { AgentError, runAgent } from "@handnote/agent";
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
-import { runAgent } from "../../src/agent.ts";
-import { AgentError } from "../../src/agent-errors.ts";
 import type { HandnoteConfig } from "../../src/config.ts";
-import type { createModel } from "../../src/provider/index.ts";
 import { createHandnoteHandlers } from "../../src/tools/index.ts";
 import { createStoreFixture } from "../helpers.ts";
 
@@ -23,7 +21,6 @@ const handlers = createHandnoteHandlers({
   store,
   sourcePath,
   width: 700,
-  maxSteps: 18,
   maxInspectCalls: 3,
   toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   recorder,
@@ -58,7 +55,9 @@ const config: HandnoteConfig = {
 try {
   await runAgent({
     config,
-    model: model as unknown as ReturnType<typeof createModel>,
+    model: model as unknown as NonNullable<
+      Parameters<typeof runAgent>[0]["model"]
+    >,
     handlers,
     source: { data: await readFile(sourcePath), mimeType: "image/png" },
     onModelEvent: async (event) => {

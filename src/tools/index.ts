@@ -1,7 +1,4 @@
-import type { HandnoteToolHandlers } from "../agent-protocol.ts";
-import { createAgentTools } from "../agent-tools.ts";
-import { asError, HandnoteError } from "../errors.ts";
-import type { RunState } from "../state.ts";
+import type { HandnoteToolHandlers } from "@handnote/agent";
 import { createCaptureFigureHandler } from "./capture-figure.ts";
 import { createFinalizeNoteHandler } from "./finalize-note.ts";
 import { createInspectSourceHandler } from "./inspect-source.ts";
@@ -28,28 +25,4 @@ export function createHandnoteHandlers(
     finalize_note: createFinalizeNoteHandler(context),
     prepareModelMedia: createMediaHandler(context),
   };
-}
-
-export function createHandnoteTools(
-  context: ToolContext & { state: RunState },
-) {
-  return createAgentTools({
-    handlers: createHandnoteHandlers(context),
-    maxSteps: context.maxSteps,
-    maxInspectCalls: context.maxInspectCalls,
-    currentStep: () => context.state.modelStep,
-    onFatal: (error) => {
-      const failure =
-        error instanceof HandnoteError
-          ? error
-          : new HandnoteError(asError(error).message, "internal", false, {
-              cause: error,
-            });
-      context.state.fail(failure);
-      throw failure;
-    },
-    onFinalized: () => {
-      context.state.finalized = true;
-    },
-  });
 }

@@ -8,9 +8,11 @@ import {
   normalizeInspectInput,
   regionPixels,
 } from "../src/image.ts";
-import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
-import { createStoreFixture } from "./helpers.ts";
+import {
+  createStoreFixture,
+  createTestHandlers,
+  ModelSteps,
+} from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -218,20 +220,17 @@ describe("image inspection", () => {
       .toFile(source);
     const store = await createStoreFixture(directory);
     const recorder = store.recorder;
-    const tools = createHandnoteTools({
+    const tools = createTestHandlers({
       store,
       sourcePath: source,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-      state: new RunState(),
+      state: new ModelSteps(),
       recorder,
     });
-    expect(tools.inspect_source.description).toContain(
-      "a region may override either",
-    );
-    const execute = tools.inspect_source.execute;
+    const execute = tools.inspect_source;
     if (!execute) throw new Error("missing inspect_source execute");
     const input = {
       regions: [{ x: 0, y: 0, width: 0.5, height: 0.5 }],
@@ -302,9 +301,9 @@ describe("image inspection", () => {
     })
       .png()
       .toFile(source);
-    const state = new RunState();
+    const state = new ModelSteps();
     const store = await createStoreFixture(directory);
-    const tools = createHandnoteTools({
+    const tools = createTestHandlers({
       store,
       sourcePath: source,
       width: 700,
@@ -314,7 +313,7 @@ describe("image inspection", () => {
       state,
       recorder: store.recorder,
     });
-    const execute = tools.inspect_source.execute;
+    const execute = tools.inspect_source;
     if (!execute) throw new Error("missing inspect_source execute");
     const executionContext = {} as Parameters<typeof execute>[1];
     await execute(
@@ -351,17 +350,17 @@ describe("image inspection", () => {
       .toFile(source);
     const store = await createStoreFixture(directory);
     const recorder = store.recorder;
-    const tools = createHandnoteTools({
+    const tools = createTestHandlers({
       store,
       sourcePath: source,
       width: 700,
       maxSteps: 18,
       maxInspectCalls: 1,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
-      state: new RunState(),
+      state: new ModelSteps(),
       recorder,
     });
-    const execute = tools.inspect_source.execute;
+    const execute = tools.inspect_source;
     if (!execute) throw new Error("missing inspect_source execute");
     const input = {
       regions: [{ x: 0, y: 0, width: 0.5, height: 0.5 }],

@@ -2,11 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
+import { runAgent } from "@handnote/agent";
 import { MockLanguageModelV3 } from "ai/test";
 import sharp from "sharp";
-import { runAgent } from "../src/agent.ts";
 import type { HandnoteConfig } from "../src/config.ts";
-import type { createModel } from "../src/provider/index.ts";
 import { createHandnoteHandlers } from "../src/tools/index.ts";
 import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
@@ -39,7 +38,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     store,
     sourcePath,
     width: 700,
-    maxSteps: 18,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
     recorder,
@@ -94,7 +92,9 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   };
   const result = await runAgent({
     config,
-    model: model as unknown as ReturnType<typeof createModel>,
+    model: model as unknown as NonNullable<
+      Parameters<typeof runAgent>[0]["model"]
+    >,
     handlers,
     source: { data: await readFile(sourcePath), mimeType: "image/png" },
     onModelEvent: async (event) => {

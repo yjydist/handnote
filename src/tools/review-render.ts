@@ -1,5 +1,5 @@
-import type { HandnoteToolHandlers } from "../agent-protocol.ts";
-import { toolError } from "../agent-protocol.ts";
+import type { HandnoteToolHandlers } from "@handnote/agent";
+import { toolError } from "@handnote/agent";
 import { createModelPreviews } from "../image.ts";
 import { NoteStateError } from "../store.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";

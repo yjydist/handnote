@@ -3,9 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { revisionDraftSchema } from "../src/document.ts";
-import { RunState } from "../src/state.ts";
-import { createHandnoteTools } from "../src/tools/index.ts";
-import { createStoreFixture, fullRegion, simpleMarkdown } from "./helpers.ts";
+import {
+  createStoreFixture,
+  createTestHandlers,
+  fullRegion,
+  ModelSteps,
+  simpleMarkdown,
+} from "./helpers.ts";
 
 const directories: string[] = [];
 async function temporary(): Promise<string> {
@@ -28,9 +32,9 @@ async function setup(directory: string) {
   })
     .png()
     .toFile(source);
-  const state = new RunState();
+  const state = new ModelSteps();
   const store = await createStoreFixture(directory);
-  const tools = createHandnoteTools({
+  const tools = createTestHandlers({
     store,
     sourcePath: source,
     width: 700,
@@ -46,7 +50,7 @@ async function setup(directory: string) {
 const prepareFinalizableNote = async (directory: string) => {
   const { state, tools, store } = await setup(directory);
   state.beginModelStep();
-  const writeExecute = tools.write_note.execute;
+  const writeExecute = tools.write_note;
   if (!writeExecute) throw new Error("missing write_note");
   const result = await writeExecute(
     { markdown: simpleMarkdown(), audit: {} },
@@ -55,7 +59,7 @@ const prepareFinalizableNote = async (directory: string) => {
   if (!("ok" in result) || !result.ok)
     throw new Error(`write_note failed: ${JSON.stringify(result)}`);
   state.beginModelStep();
-  const reviewExecute = tools.review_render.execute;
+  const reviewExecute = tools.review_render;
   if (!reviewExecute) throw new Error("missing review_render");
   await reviewExecute({}, {} as Parameters<typeof reviewExecute>[1]);
   state.beginModelStep();
@@ -66,7 +70,7 @@ describe("note tool sequencing", () => {
   test("revise_note before write_note is rejected as no_revision", async () => {
     const directory = await temporary();
     const { tools } = await setup(directory);
-    const execute = tools.revise_note.execute;
+    const execute = tools.revise_note;
     if (!execute) throw new Error("missing revise_note");
     const result = await execute(
       { markdown: simpleMarkdown(), audit: {} },
@@ -82,7 +86,7 @@ describe("note tool sequencing", () => {
     const directory = await temporary();
     const { state, tools } = await setup(directory);
     state.beginModelStep();
-    const execute = tools.write_note.execute;
+    const execute = tools.write_note;
     if (!execute) throw new Error("missing write_note");
     await execute(
       { markdown: simpleMarkdown(), audit: {} },
@@ -102,8 +106,8 @@ describe("note tool sequencing", () => {
     const directory = await temporary();
     const { state, tools } = await setup(directory);
     state.beginModelStep();
-    const write = tools.write_note.execute;
-    const read = tools.read_note.execute;
+    const write = tools.write_note;
+    const read = tools.read_note;
     if (!write || !read) throw new Error("missing tools");
     const committed = await write(
       { markdown: simpleMarkdown(), audit: {} },
@@ -123,7 +127,7 @@ describe("note tool sequencing", () => {
   test("read_note without a revision is rejected as no_revision", async () => {
     const directory = await temporary();
     const { tools } = await setup(directory);
-    const read = tools.read_note.execute;
+    const read = tools.read_note;
     if (!read) throw new Error("missing read_note");
     const result = await read({}, {} as Parameters<typeof read>[1]);
     expect(result).toMatchObject({ ok: false, error: { code: "no_revision" } });
@@ -133,7 +137,7 @@ describe("note tool sequencing", () => {
     const directory = await temporary();
     const { state, tools, store } = await setup(directory);
     state.beginModelStep();
-    const execute = tools.write_note.execute;
+    const execute = tools.write_note;
     if (!execute) throw new Error("missing write_note");
     const result = await execute(
       {
@@ -160,36 +164,14 @@ describe("note tool sequencing", () => {
     });
     expect(store.manifest.revisions.at(-1)).toBeUndefined();
   });
-
-  test("note draft input schema strips no unknown keys: strict rejection at the tool boundary", async () => {
-    const directory = await temporary();
-    const { tools } = await setup(directory);
-    const schema = tools.write_note.inputSchema;
-    if (!schema) throw new Error("missing write_note inputSchema");
-    expect(
-      schema.safeParse({
-        markdown: simpleMarkdown(),
-        extra: 1,
-      }).success,
-    ).toBe(false);
-    expect(
-      schema.safeParse({
-        markdown: simpleMarkdown(),
-        audit: { corrections: [], uncertainties: [], extra: 1 },
-      }).success,
-    ).toBe(false);
-    expect(
-      schema.safeParse({ markdown: simpleMarkdown(), audit: {} }).success,
-    ).toBe(true);
-  });
 });
 
 describe("finalize hash binding", () => {
   test("classifies an unreadable revision file as filesystem", async () => {
     const directory = await temporary();
-    const { state, tools } = await prepareFinalizableNote(directory);
+    const { tools, store } = await prepareFinalizableNote(directory);
     await rm(`${directory}/intermediate/revisions/0001/note.md`);
-    const finalize = tools.finalize_note.execute;
+    const finalize = tools.finalize_note;
     if (!finalize) throw new Error("missing finalize_note");
     await expect(
       finalize({}, {} as Parameters<typeof finalize>[1]),
@@ -197,15 +179,15 @@ describe("finalize hash binding", () => {
       kind: "filesystem",
       message: expect.stringContaining("Cannot read verified artifact"),
     });
-    expect(state.finalized).toBe(false);
+    expect(store.manifest.status).not.toBe("complete");
   });
 
   test("finalize fails fatally when the revision file on disk no longer matches the reviewed hash", async () => {
     const directory = await temporary();
-    const { state, tools } = await prepareFinalizableNote(directory);
+    const { tools, store } = await prepareFinalizableNote(directory);
     const markdownPath = `${directory}/intermediate/revisions/0001/note.md`;
     await writeFile(markdownPath, "tampered after review\n");
-    const finalize = tools.finalize_note.execute;
+    const finalize = tools.finalize_note;
     if (!finalize) throw new Error("missing finalize_note");
     await expect(
       finalize({}, {} as Parameters<typeof finalize>[1]),
@@ -213,13 +195,13 @@ describe("finalize hash binding", () => {
       kind: "filesystem",
       message: expect.stringContaining("hash mismatch"),
     });
-    expect(state.finalized).toBe(false);
+    expect(store.manifest.status).not.toBe("complete");
   });
 
   test("finalize succeeds when the revision file matches and records its hash", async () => {
     const directory = await temporary();
     const { tools, store } = await prepareFinalizableNote(directory);
-    const finalize = tools.finalize_note.execute;
+    const finalize = tools.finalize_note;
     if (!finalize) throw new Error("missing finalize_note");
     const result = await finalize({}, {} as Parameters<typeof finalize>[1]);
     expect(result).toMatchObject({ ok: true, revision: 1 });
@@ -386,7 +368,7 @@ describe("source audit tool contract", () => {
   test("validates source locators before rendering and preserves a reviewed revision on failure", async () => {
     const directory = await temporary();
     const { tools, store } = await prepareFinalizableNote(directory);
-    const revise = tools.revise_note.execute;
+    const revise = tools.revise_note;
     if (!revise) throw new Error("missing revise_note");
     const revision = store.manifest.revisions.at(-1);
     if (!revision) throw new Error("missing revision");
@@ -443,9 +425,9 @@ describe("source audit tool contract", () => {
   test("nonblank invisible content can commit but still needs later review and finalize", async () => {
     const directory = await temporary();
     const { state, tools, store } = await setup(directory);
-    const write = tools.write_note.execute;
-    const review = tools.review_render.execute;
-    const finalize = tools.finalize_note.execute;
+    const write = tools.write_note;
+    const review = tools.review_render;
+    const finalize = tools.finalize_note;
     if (!write || !review || !finalize) throw new Error("missing tools");
     const context = {} as Parameters<typeof write>[1];
     state.beginModelStep();
@@ -470,13 +452,13 @@ describe("source audit tool contract", () => {
       ok: true,
       revision: 1,
     });
-    expect(state.finalized).toBe(true);
+    expect(store.manifest.status).toBe("complete");
   }, 30_000);
 
   test("source occurrences include discarded cells and sanitized content", async () => {
     const directory = await temporary();
     const { tools, store } = await setup(directory);
-    const write = tools.write_note.execute;
+    const write = tools.write_note;
     if (!write) throw new Error("missing write_note");
     const context = {} as Parameters<typeof write>[1];
     const markdown = "| A |\n| - |\n| B | Hidden |\n\n<script>Hidden</script>";
@@ -497,7 +479,7 @@ describe("source audit tool contract", () => {
   test("blank, oversized and remote-image drafts return repairable input errors", async () => {
     const directory = await temporary();
     const { tools, store } = await setup(directory);
-    const write = tools.write_note.execute;
+    const write = tools.write_note;
     if (!write) throw new Error("missing write_note");
     for (const [markdown, code] of [
       [" \n\t", "empty_document"],

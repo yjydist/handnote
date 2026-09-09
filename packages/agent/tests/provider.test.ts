@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import type { ModelEvent } from "@handnote/agent";
 import {
   classifyProviderError,
   convertDeepSeekUsage,
@@ -10,22 +9,7 @@ import {
   repairToolArgumentResponse,
   requestFingerprint,
 } from "../src/provider/index.ts";
-import { SessionRecorder } from "../src/session.ts";
 import { RunState } from "../src/state.ts";
-
-const directories: string[] = [];
-async function temporary(): Promise<string> {
-  const path = await mkdtemp(`${tmpdir()}/handnote-provider-`);
-  directories.push(path);
-  return path;
-}
-afterEach(async () => {
-  await Promise.all(
-    directories
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
-  );
-});
 
 describe("provider transport", () => {
   test("repairs only excess trailing tool-argument closers", async () => {
@@ -65,12 +49,11 @@ describe("provider transport", () => {
   });
 
   test("repairs Provider tool arguments before SDK validation and records metadata", async () => {
-    const directory = await temporary();
-    const recorder = SessionRecorder.create(directory);
+    const events: ModelEvent[] = [];
     const retrying = createRetryingFetch(
       { timeoutMs: 1_000, maxRetries: 0 },
       new RunState(async (event) => {
-        recorder.record(event.type, event.data);
+        events.push(event);
       }),
       (async () =>
         new Response(
@@ -94,7 +77,7 @@ describe("provider transport", () => {
         )) as unknown as typeof fetch,
       repairToolArgumentResponse(
         new RunState(async (event) => {
-          recorder.record(event.type, event.data);
+          events.push(event);
         }),
       ),
     );
@@ -111,17 +94,18 @@ describe("provider transport", () => {
         payload.choices[0]?.message.tool_calls[0]?.function.arguments ?? "",
       ),
     ).toEqual({ document: {}, audit: {} });
-    const session = await readFile(recorder.path, "utf8");
+    const session = JSON.stringify(
+      events.map(({ type, data }) => ({ type, data })),
+    );
     expect(session).toContain('"type":"model.tool_arguments.repaired"');
     expect(session).toContain('"removedTrailingClosers":1');
     expect(session).not.toContain('"document"');
   });
 
   test("retries 429 and all 5xx responses but does not retry 401", async () => {
-    const directory = await temporary();
-    const recorder = SessionRecorder.create(directory);
+    const events: ModelEvent[] = [];
     const state = new RunState(async (event) => {
-      recorder.record(event.type, event.data);
+      events.push(event);
     });
     let calls = 0;
     const retrying = createRetryingFetch(
@@ -174,10 +158,9 @@ describe("provider transport", () => {
   });
 
   test("gives each timed-out attempt its own deadline", async () => {
-    const directory = await temporary();
-    const recorder = SessionRecorder.create(directory);
+    const events: ModelEvent[] = [];
     const state = new RunState(async (event) => {
-      recorder.record(event.type, event.data);
+      events.push(event);
     });
     let calls = 0;
     const timingOut = createRetryingFetch(
@@ -209,10 +192,9 @@ describe("provider transport", () => {
   });
 
   test("does not transport-retry a body stream after response start", async () => {
-    const directory = await temporary();
-    const recorder = SessionRecorder.create(directory);
+    const events: ModelEvent[] = [];
     const state = new RunState(async (event) => {
-      recorder.record(event.type, event.data);
+      events.push(event);
     });
     let calls = 0;
     const retrying = createRetryingFetch(

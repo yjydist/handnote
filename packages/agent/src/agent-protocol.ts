@@ -206,11 +206,11 @@ export interface HandnoteToolHandlers {
     context: ToolExecutionContext,
   ): Promise<z.output<typeof readNoteOutputSchema>>;
   write_note(
-    input: z.output<typeof noteDraftInputSchema>,
+    input: z.input<typeof noteDraftInputSchema>,
     context: ToolExecutionContext,
   ): Promise<z.output<typeof noteRevisionOutputSchema>>;
   revise_note(
-    input: z.output<typeof noteDraftInputSchema>,
+    input: z.input<typeof noteDraftInputSchema>,
     context: ToolExecutionContext,
   ): Promise<z.output<typeof noteRevisionOutputSchema>>;
   review_render(

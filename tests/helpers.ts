@@ -1,8 +1,13 @@
 import { rm } from "node:fs/promises";
+import type { HandnoteToolHandlers } from "@handnote/agent";
 import sharp from "sharp";
 import type { RevisionDraft } from "../src/document.ts";
 import type { RedactionOptions } from "../src/redact.ts";
 import { RunStore } from "../src/store.ts";
+import {
+  createHandnoteHandlers,
+  type ToolContext,
+} from "../src/tools/index.ts";
 
 export const fullRegion = { x: 0, y: 0, width: 1, height: 1 } as const;
 
@@ -37,4 +42,51 @@ export async function createStoreFixture(
   await store.copyInput(source);
   await rm(source);
   return store;
+}
+
+export class ModelSteps {
+  modelStep = 0;
+  beginModelStep(): number {
+    return ++this.modelStep;
+  }
+}
+
+export function createTestHandlers(
+  context: ToolContext & { state: ModelSteps; maxSteps: number },
+) {
+  const handlers = createHandnoteHandlers(context);
+  const execution = () => ({
+    step: context.state.modelStep,
+    remainingSteps: Math.max(0, context.maxSteps - context.state.modelStep),
+  });
+  return {
+    inspect_source: (
+      input: Parameters<HandnoteToolHandlers["inspect_source"]>[0],
+      _context?: unknown,
+    ) => handlers.inspect_source(input, execution()),
+    capture_figure: (
+      input: Parameters<HandnoteToolHandlers["capture_figure"]>[0],
+      _context?: unknown,
+    ) => handlers.capture_figure(input, execution()),
+    read_note: (
+      input: Parameters<HandnoteToolHandlers["read_note"]>[0],
+      _context?: unknown,
+    ) => handlers.read_note(input, execution()),
+    write_note: (
+      input: Parameters<HandnoteToolHandlers["write_note"]>[0],
+      _context?: unknown,
+    ) => handlers.write_note(input, execution()),
+    revise_note: (
+      input: Parameters<HandnoteToolHandlers["revise_note"]>[0],
+      _context?: unknown,
+    ) => handlers.revise_note(input, execution()),
+    review_render: (
+      input: Parameters<HandnoteToolHandlers["review_render"]>[0],
+      _context?: unknown,
+    ) => handlers.review_render(input, execution()),
+    finalize_note: (
+      input: Parameters<HandnoteToolHandlers["finalize_note"]>[0],
+      _context?: unknown,
+    ) => handlers.finalize_note(input, execution()),
+  };
 }

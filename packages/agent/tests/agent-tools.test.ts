@@ -190,3 +190,33 @@ test("the agent formats prepared previews and failure text for the model", async
     value: "The note is not ready",
   });
 });
+
+test("tool schemas reject out-of-bounds crops and unknown draft fields", async () => {
+  const { tools } = setup({});
+  expect(tools.inspect_source.description).toContain(
+    "a region may override either",
+  );
+  const execute = tools.capture_figure.execute;
+  if (!execute) throw new Error("Missing capture operation");
+  const rejected = await execute(
+    { region: { x: 0.5, y: 0, width: 0.6, height: 1 } },
+    {} as Parameters<typeof execute>[1],
+  );
+  expect(JSON.stringify(rejected)).toContain(
+    "Region exceeds normalized image bounds",
+  );
+  const schema = tools.write_note.inputSchema;
+  if (!schema) throw new Error("Missing draft schema");
+  expect(schema.safeParse({ markdown: "A note", extra: 1 }).success).toBe(
+    false,
+  );
+  expect(
+    schema.safeParse({
+      markdown: "A note",
+      audit: { corrections: [], uncertainties: [], extra: 1 },
+    }).success,
+  ).toBe(false);
+  expect(schema.safeParse({ markdown: "A note", audit: {} }).success).toBe(
+    true,
+  );
+});

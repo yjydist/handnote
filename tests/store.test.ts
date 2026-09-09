@@ -4,13 +4,17 @@ import { existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { TokenUsage } from "@handnote/agent";
+import {
+  accountModelAttempt,
+  accountModelStep,
+  createModelAccounting,
+} from "@handnote/agent";
 import sharp from "sharp";
 import { compileNoteMarkdown } from "../src/markdown.ts";
 import * as renderer from "../src/renderer.ts";
 import { readSession, SessionRecorder } from "../src/session.ts";
-import { RunState } from "../src/state.ts";
 import { RunStore } from "../src/store.ts";
-import type { TokenUsage } from "../src/usage.ts";
 import { sha256File } from "../src/utils.ts";
 import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
@@ -535,15 +539,15 @@ describe("session and recovery", () => {
     "preserves per-step usage through persistence and recovery: $name",
     async ({ steps, expected }) => {
       const store = await setup();
-      const state = new RunState();
+      let model = createModelAccounting();
       for (const usage of steps) {
-        const step = state.beginModelStep();
-        state.beginModelAttempt({ step, attempt: 1 });
+        const step = model.steps + 1;
+        model = accountModelAttempt(model, { step, attempt: 1 });
         store.recorder.record("model.attempt.started", { step, attempt: 1 });
-        state.completeModelStep(usage);
+        model = accountModelStep(model, { step, usage });
         store.recorder.record("model.step.completed", { step, usage });
-        await store.updateModel(state.modelAccounting);
-        expect(store.manifest.model.usage).toEqual(state.modelAccounting.usage);
+        await store.updateModel(model);
+        expect(store.manifest.model.usage).toEqual(model.usage);
       }
       expect(store.manifest.model.usage).toEqual(expected);
       await store.finish("model_stopped_no_revision");

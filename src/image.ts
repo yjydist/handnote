@@ -1,19 +1,19 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, rm } from "node:fs/promises";
-import sharp from "sharp";
 import {
   type CaptureFigureRequest,
   captureFigureInputSchema,
   type InspectRequest,
   inspectInputSchema,
-} from "./agent-protocol.ts";
+} from "@handnote/agent";
+import sharp from "sharp";
 
 export {
   type CaptureFigureRequest,
   captureFigureInputSchema,
   type InspectRequest,
   inspectInputSchema,
-} from "./agent-protocol.ts";
+} from "@handnote/agent";
 
 import { type Region, regionSchema } from "./document.ts";
 import { HandnoteError } from "./errors.ts";

@@ -1,9 +1,9 @@
-import { z } from "zod";
 import {
   type NoteToolResult,
   type ToolExecutionContext,
   toolError,
-} from "../agent-protocol.ts";
+} from "@handnote/agent";
+import { z } from "zod";
 import { MarkdownValidationError } from "../markdown.ts";
 import { NoteStateError } from "../store.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";
