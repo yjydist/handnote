@@ -1,4 +1,12 @@
 export {
+  createInkFragment,
+  type InkAsset,
+  type InkFragment,
+  type InkPresentation,
+  inkAssetJson,
+  renderInkAsset,
+} from "./assets.ts";
+export {
   type AssociatedInkCandidate,
   associateInk,
   type InkAssociationReport,
