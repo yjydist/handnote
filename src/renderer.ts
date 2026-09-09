@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import sharp from "sharp";
@@ -20,12 +20,11 @@ export interface RenderResult {
   structure: NoteStructure;
 }
 
-const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-
 async function fontCss(): Promise<string> {
-  const directory = resolve(
-    packageRoot,
-    "node_modules/@fontsource-variable/noto-sans-sc",
+  const directory = dirname(
+    fileURLToPath(
+      import.meta.resolve("@fontsource-variable/noto-sans-sc/wght.css"),
+    ),
   );
   let css = await readFile(`${directory}/wght.css`, "utf8");
   const matches = [...css.matchAll(/url\((\.\/files\/[^)]+\.woff2)\)/g)]
@@ -42,7 +41,9 @@ async function fontCss(): Promise<string> {
 }
 
 async function katexCss(): Promise<string> {
-  const directory = resolve(packageRoot, "node_modules/katex/dist");
+  const directory = dirname(
+    fileURLToPath(import.meta.resolve("katex/dist/katex.min.css")),
+  );
   let css = await readFile(`${directory}/katex.min.css`, "utf8");
   const sources = [...css.matchAll(/src:url\(fonts\/([^)]+\.woff2)\)[^}]*/g)];
   for (const match of sources) {
@@ -65,7 +66,7 @@ async function buildHtml(note: CompiledNote, width: number): Promise<string> {
     fontCss(),
     katexCss(),
     readFile(
-      resolve(packageRoot, "node_modules/mermaid/dist/mermaid.min.js"),
+      fileURLToPath(import.meta.resolve("mermaid/dist/mermaid.min.js")),
       "utf8",
     ),
   ]);

@@ -32,6 +32,36 @@ afterEach(async () => {
 });
 
 describe("renderer", () => {
+  test("loads bundled rendering resources outside the repository cwd", async () => {
+    const directory = await temporary();
+    const compiler = new URL("../src/markdown.ts", import.meta.url).pathname;
+    const renderer = new URL("../src/renderer.ts", import.meta.url).pathname;
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        `import { compileNoteMarkdown } from ${JSON.stringify(compiler)};
+       import { renderDocument } from ${JSON.stringify(renderer)};
+       const note = await compileNoteMarkdown("# 中文\\n\\n$x$\\n\\n\`\`\`mermaid\\ngraph TD\\n A --> B\\n\`\`\`", { runDirectory: process.cwd() });
+       const result = await renderDocument(note, "render", 700);
+       console.log(JSON.stringify(result));`,
+      ],
+      { cwd: directory, stdout: "pipe", stderr: "pipe" },
+    );
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+    expect(JSON.parse(stdout)).toMatchObject({
+      width: 700,
+      warnings: [],
+      structure: { headings: 1, equations: 1, diagrams: 1 },
+    });
+    expect(await Bun.file(`${directory}/render/note.png`).exists()).toBe(true);
+  }, 30_000);
+
   test("renders self-contained Chinese HTML, KaTeX fallback, Mermaid, table, and figure", async () => {
     const directory = await temporary();
     const source = `${directory}/source.png`;
