@@ -15,9 +15,11 @@ import {
   parseInkJson,
 } from "@handnote/ink";
 import { MockLanguageModelV3 } from "ai/test";
+import { chromium } from "playwright";
 import { readSession } from "../src/session.ts";
 import { RunStore } from "../src/store.ts";
 import { createHandnoteHandlers } from "../src/tools/index.ts";
+import { createStoreFixture, simpleDraft } from "./helpers.ts";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -72,6 +74,32 @@ const audit = {
 };
 const execution = (step: number) => ({ step, remainingSteps: 50 - step });
 
+test("v1 review keeps its original single-view model summary", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/handnote-v1-review-`);
+  directories.push(directory);
+  const store = await createStoreFixture(directory);
+  const handlers = createHandnoteHandlers({
+    store,
+    recorder: store.recorder,
+    sourcePath: store.path(store.manifest.input.path),
+    width: 720,
+    maxInspectCalls: 3,
+    toolMedia: { maxEdge: 2048, jpegQuality: 85 },
+  });
+  expect((await handlers.write_note(simpleDraft(), execution(1))).ok).toBe(
+    true,
+  );
+  const review = await handlers.review_render({}, execution(2));
+  if (!review.ok) throw new Error("Missing review");
+  expect(review.paths).toBeUndefined();
+  const media = await handlers.prepareModelMedia("review_render", review);
+  if (media.kind !== "previews") throw new Error("Missing review media");
+  expect(media.previews).toHaveLength(1);
+  expect(media.summary).toBe(
+    "Review revision 1; no blocking layout warnings; 48 model step(s) remain after this one. If source comparison finds no content issue, call finalize_note in the next model step without another revision.",
+  );
+}, 30000);
+
 test.each(["review.json", "360", "360/note.png"])(
   "ink review rejects linked output targets before authorizing review: %s",
   async (target) => {
@@ -102,7 +130,7 @@ test.each(["review.json", "360", "360/note.png"])(
   30000,
 );
 
-test("offline model sees real media through inspect, select, compose, write, review, revise, review and finalize", async () => {
+test("offline model sees real media and rendered table counts before and after repairing a missing GFM separator", async () => {
   const { store, handlers, sourcePath, document } = await setup();
   const presentation = { kind: "text" as const, referenceHeight: 22 };
   const fragments = [0, 1, 2].map((index) =>
@@ -120,7 +148,7 @@ test("offline model sees real media through inspect, select, compose, write, rev
     { parts, presentation },
     new Map(fragments.map((asset) => [asset.id, asset])),
   );
-  const markdown = `# ![字](../assets/ink/${composed.id}.svg)`;
+  const tableHeader = `| ![字](../assets/ink/${composed.id}.svg) |`;
   const script = [
     {
       name: "inspect_ink",
@@ -144,7 +172,7 @@ test("offline model sees real media through inspect, select, compose, write, rev
     {
       name: "write_note",
       input: {
-        markdown,
+        markdown: `${tableHeader}\n| |`,
         audit,
       },
     },
@@ -152,7 +180,7 @@ test("offline model sees real media through inspect, select, compose, write, rev
     {
       name: "revise_note",
       input: {
-        markdown: `${markdown}\n\n![补全](../assets/ink/${fragments[2]?.id}.svg)`,
+        markdown: `${tableHeader}\n| --- |\n| ![补全](../assets/ink/${fragments[2]?.id}.svg) |`,
         audit,
       },
     },
@@ -210,6 +238,28 @@ test("offline model sees real media through inspect, select, compose, write, rev
     onDiagnostic: () => undefined,
   });
   expect(result.steps).toBe(8);
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    for (const [index, tables] of [0, 1].entries()) {
+      const revision = store.manifest.revisions[index];
+      if (!revision) throw new Error("Missing rendered revision");
+      expect(revision.structure.tables).toBe(tables);
+      await page.goto(`file://${store.path(revision.html.path)}`);
+      expect(await page.locator("table").count()).toBe(tables);
+      const modelReview = JSON.stringify(
+        model.doGenerateCalls[index === 0 ? 5 : 7]?.prompt
+          .filter((message) => message.role === "tool")
+          .at(-1),
+        (key, value) => (key === "data" ? "[media]" : value),
+      );
+      expect(modelReview).toContain("Rendered structure:");
+      expect(modelReview).toContain(`tables=${tables}`);
+      expect(modelReview).toContain('"type":"image-data"');
+    }
+  } finally {
+    await browser.close();
+  }
   expect(store.manifest.final?.revision).toBe(2);
   expect(store.manifest.final?.dependenciesSha256).toBe(
     store.manifest.revisions[1]?.dependenciesSha256 ?? "missing digest",
