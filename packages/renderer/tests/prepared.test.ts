@@ -10,6 +10,28 @@ import {
 import { clonePreparedDocument } from "../src/prepared.ts";
 
 describe("prepared Markdown documents", () => {
+  test("separates retained HTML blocks and excludes initially collapsed detail content", async () => {
+    for (const markdown of [
+      "<div>甲<hr>乙</div>",
+      "<dl><dt>甲</dt><dd>乙</dd></dl>",
+      "<details open><summary>甲</summary>乙</details>",
+    ]) {
+      const prepared = await prepareDocument(markdown);
+      expect(prepared.textRanges.map((range) => range.text)).toEqual([
+        "甲",
+        "乙",
+      ]);
+      expect(
+        new Set(prepared.textRanges.map((range) => range.flowId)).size,
+      ).toBe(2);
+    }
+    const markdown = "<details><summary>甲</summary>乙</details>";
+    const prepared = await prepareDocument(markdown);
+    expect(prepared.textRanges.map((range) => range.text)).toEqual(["甲"]);
+    expect(clonePreparedDocument(prepared).note.html).toBe(
+      (await compileNoteMarkdown(markdown)).html,
+    );
+  });
   test("keeps inline formatting continuous but separates non-text and hard-break flows", async () => {
     for (const separator of ["`代码`", "$x$", "<br>", "![图](image.png)"]) {
       const document = await prepareDocument(`甲${separator}乙`, {

@@ -83,6 +83,7 @@ interface Flow {
 }
 
 const excludedTags = new Set([
+  "hr",
   "pre",
   "code",
   "table",
@@ -175,7 +176,9 @@ function collectRanges(tree: Root): {
         node.properties.dataFootnoteRef !== undefined ||
         node.properties.dataFootnoteBackref !== undefined
       ) {
-        if (["pre", "table", "figure", "figcaption"].includes(node.tagName)) {
+        if (
+          ["pre", "table", "figure", "figcaption", "hr"].includes(node.tagName)
+        ) {
           delete flow.pending;
           flow.hasContent = false;
         } else {
@@ -194,9 +197,27 @@ function collectRanges(tree: Root): {
       inList ||= node.tagName === "li";
       if (
         /^h[1-6]$/.test(node.tagName) ||
-        ["p", "li", "div", "section", "blockquote", "ul", "ol"].includes(
-          node.tagName,
-        )
+        [
+          "p",
+          "li",
+          "div",
+          "section",
+          "blockquote",
+          "ul",
+          "ol",
+          "dl",
+          "dt",
+          "dd",
+          "details",
+          "summary",
+          "address",
+          "article",
+          "aside",
+          "footer",
+          "header",
+          "main",
+          "nav",
+        ].includes(node.tagName)
       ) {
         delete flow.pending;
         flow.hasContent = false;
@@ -217,6 +238,13 @@ function collectRanges(tree: Root): {
       }
     }
     node.children.forEach((child, index) => {
+      if (
+        node.type === "element" &&
+        node.tagName === "details" &&
+        node.properties.open !== true &&
+        !(child.type === "element" && child.tagName === "summary")
+      )
+        return;
       walk(child, [...path, index], block, flow, inList);
     });
     if (startsBlock) parentFlow.id = nextFlowId();

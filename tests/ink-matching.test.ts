@@ -153,6 +153,24 @@ test("does not bind standalone source lines into longer rewritten targets", asyn
   }
 });
 
+test("does not borrow context across HTML block separators or collapsed content", async () => {
+  for (const markdown of [
+    "<div>甲<hr>乙</div>",
+    "<dl><dt>甲</dt><dd>乙</dd></dl>",
+    "<details><summary>甲</summary>乙</details>",
+  ]) {
+    const document = await prepareDocument(markdown);
+    expect(
+      matchInkSources(
+        document,
+        "source",
+        [source(1, "甲", "甲乙")],
+        lines("甲乙"),
+      ).bindings,
+    ).toEqual([]);
+  }
+});
+
 test("retains sentence punctuation and formatting boundaries in passage evidence", async () => {
   const document = await prepareDocument("新增。\n\n他说：“天气**晴朗**。”");
   const original = "他说：“天气晴朗。”";
