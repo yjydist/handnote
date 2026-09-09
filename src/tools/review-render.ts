@@ -3,13 +3,11 @@ import type { HandnoteToolHandlers } from "../agent/index.ts";
 import { toolError } from "../agent/index.ts";
 import { createModelPreviews } from "../run/image.ts";
 import { compileNoteMarkdown } from "../run/markdown.ts";
-import { renderDocument } from "../run/renderer.ts";
 import { NoteStateError } from "../run/store.ts";
 import { atomicWrite } from "../run/utils.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
-export const inkReviewWidths = [360, 720, 1200, 1600] as const;
 type ReviewOutput = Awaited<ReturnType<HandnoteToolHandlers["review_render"]>>;
 class BlockedInkReview extends Error {
   constructor(readonly output: ReviewOutput) {
@@ -40,44 +38,18 @@ export function createReviewRenderHandler(
             const relativeDirectory = `session/ink-reviews/revision-${revision.number}/step-${execution.step}`;
             const directory = context.store.path(relativeDirectory);
             context.store.path(`${relativeDirectory}/review.json`);
-            for (const width of inkReviewWidths) {
-              if (width === revision.width) continue;
-              context.store.path(`${relativeDirectory}/${width}/note.html`);
-              context.store.path(`${relativeDirectory}/${width}/note.png`);
-            }
             await mkdir(directory, { recursive: true });
-            const views = [];
-            for (const width of inkReviewWidths) {
-              const render =
-                width === revision.width
-                  ? {
-                      imagePath: context.store.path(revision.image.path),
-                      width,
-                      height: revision.height,
-                      warnings: revision.warnings,
-                    }
-                  : await renderDocument(
-                      note,
-                      context.store.path(`${relativeDirectory}/${width}`),
-                      width,
-                    );
-              await createModelPreviews(render.imagePath, context.toolMedia);
-              views.push({
-                width,
-                height: render.height,
-                image: await context.recorder.media(
-                  render.imagePath,
-                  "image/png",
-                ),
-                warnings: render.warnings,
-              });
-            }
-            const warnings = views.flatMap((view) =>
-              view.warnings.map((warning) => ({
-                ...warning,
-                message: `${view.width}px: ${warning.message}`,
-              })),
-            );
+            const imagePath = context.store.path(revision.image.path);
+            await createModelPreviews(imagePath, context.toolMedia);
+            const views = [
+              {
+                width: revision.width,
+                height: revision.height,
+                image: await context.recorder.media(imagePath, "image/png"),
+                warnings: revision.warnings,
+              },
+            ];
+            const warnings = revision.warnings;
             const reviewed = !warnings.some((warning) => warning.blocking);
             const structure = Object.entries(revision.structure)
               .map(([name, count]) => `${name}=${count}`)
@@ -108,7 +80,7 @@ export function createReviewRenderHandler(
               warnings,
               structure: revision.structure,
               reviewed,
-              summary: `Review revision ${revision.number}; views in order: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. Rendered structure: ${structure}. ${reviewed ? "Compare every view with the complete source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} ${coverage} Judgment: pending-human-review.`,
+              summary: `Review revision ${revision.number}; A4 output: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. Rendered structure: ${structure}. ${reviewed ? "Compare the complete A4 output with the source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} ${coverage} Judgment: pending-human-review.`,
             };
             if (!reviewed) throw new BlockedInkReview(inkOutput);
             return;

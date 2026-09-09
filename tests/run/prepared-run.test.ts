@@ -68,7 +68,6 @@ test.each(["complete", "partial", "failed"] as const)(
       configPath: `${directory}/prepared.yaml`,
       maxSteps: 8,
       maxInspectCalls: 3,
-      width: 720,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
       saveIntermediateImages: true,
     };
@@ -217,7 +216,7 @@ test.each(["complete", "partial", "failed"] as const)(
       );
       expect(
         existsSync(
-          stored.path("session/ink-reviews/revision-1/step-4/360/note.png"),
+          stored.path("session/ink-reviews/revision-1/step-4/review.json"),
         ),
       ).toBe(true);
       expect(result.manifest.error).toBeUndefined();

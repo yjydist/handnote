@@ -7,6 +7,7 @@ import { Command } from "commander";
 import sharp from "sharp";
 import { loadConfig } from "../src/config.ts";
 import { loadPrompt } from "../src/prompt/index.ts";
+import { a4Page } from "../src/renderer/page.ts";
 import type { RunResult } from "../src/run/manifest.ts";
 import { compileNoteMarkdown } from "../src/run/markdown.ts";
 import { isRedactedCredential } from "../src/run/redact.ts";
@@ -159,7 +160,7 @@ export async function inspectEvalAttempt(
     maxImages: 0,
   };
   let finalizedEvent = false;
-  let configuredWidth = 1600;
+  let configuredWidth: number = a4Page.width;
   for (const event of events) {
     const type = event.type;
     const data =
@@ -594,7 +595,7 @@ export async function main(argv = process.argv): Promise<number> {
       maxRetries: config.model.maxRetries,
       maxSteps: config.maxSteps,
       maxInspectCalls: config.maxInspectCalls,
-      width: config.width,
+      width: a4Page.width,
       promptSha256: (await loadPrompt("transcription")).sha256,
     };
     const report: EvalReport = {

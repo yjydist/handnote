@@ -26,14 +26,13 @@ model:
   maxRetries: 1
 maxSteps: 18
 maxInspectCalls: 3
-width: 1600
 toolMedia:
   maxEdge: 2048
   jpegQuality: 85
 saveIntermediateImages: true
 ```
 
-`timeoutMs`, `maxRetries`, `maxSteps`, `maxInspectCalls`, `width`, `toolMedia`, and `saveIntermediateImages` may be omitted to use those shown defaults. `timeoutMs` covers the complete Provider response stream. Tool images are deterministically converted to bounded JPEG previews for model input; retained inspection and render artifacts remain PNG. Identical inspections are reused within a run, while the unique-call budget prevents inspection loops from consuming the document, review, and finalization steps.
+`timeoutMs`, `maxRetries`, `maxSteps`, `maxInspectCalls`, `toolMedia`, and `saveIntermediateImages` may be omitted to use those shown defaults. `timeoutMs` covers the complete Provider response stream. Tool images are deterministically converted to bounded JPEG previews for model input; retained inspection and render artifacts remain PNG. Identical inspections are reused within a run, while the unique-call budget prevents inspection loops from consuming the document, review, and finalization steps.
 
 ## Run
 
@@ -131,4 +130,6 @@ Tests are offline and must not call a real Provider. The MVP intentionally omits
 
 `bun run eval:ink:full -- --output <new-directory> --config config.yaml --pages 2,69,70` runs the pinned development pages through the application. It saves source and material evidence, categorized model usage, per-attempt request measurements, and model-facing tool text/image measurements. Missing historical measurements remain absent. This command calls the configured provider; offline tests inject a model.
 
-Prompts and rendering style are maintained with the application. Configuration fields `prompt`, `theme`, and `fontFamily` are no longer accepted; remove them from existing YAML files. The model start event records the SHA-256 of the actual assembled instructions.
+Prompts and rendering style are maintained with the application. Configuration fields `prompt`, `theme`, `fontFamily`, and `width` are no longer accepted; remove them from existing YAML files. The model start event records the SHA-256 of the actual assembled instructions.
+
+Output is fixed at 2480 pixels wide with 300 DPI metadata, corresponding to A4's 210 mm width; height follows the content without pagination. The 1200 CSS-pixel layout preserves its typography and spacing while Chromium rasterizes at higher density. Review uses the exact committed image, with overlapping model-preview tiles for long notes. Layout warnings report CSS pixels.

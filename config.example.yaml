@@ -7,7 +7,6 @@ model:
 
 maxSteps: 18
 maxInspectCalls: 3
-width: 1600
 toolMedia:
   maxEdge: 2048
   jpegQuality: 85

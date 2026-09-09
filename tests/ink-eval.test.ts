@@ -111,7 +111,7 @@ test("a stopped offline experiment keeps source, usage and failure evidence with
   expect(await readFile(`${output}/results.json`, "utf8")).toBe(index);
 }, 30000);
 
-test("evidence export renders all widths from the last valid revision and records the full material graph", async () => {
+test("evidence export references the committed A4 revision and records the full material graph", async () => {
   const directory = await temporary();
   const points = Buffer.from(
     JSON.stringify([
@@ -141,7 +141,7 @@ test("evidence export renders all widths from the last valid revision and record
       markdown: `![字](../assets/ink/${asset.id}.svg)`,
       audit: { corrections: [], uncertainties: [] },
     },
-    { kind: "write", step: 1, width: 1200 },
+    { kind: "write", step: 1 },
   );
   const manifest = await store.finish("model_stopped");
   const evidence = await collectFullPageEvidence({
@@ -152,9 +152,11 @@ test("evidence export renders all widths from the last valid revision and record
   });
   expect(evidence.runStatus).toBe("partial");
   expect(evidence.acceptance).toBe("not-assessed");
-  expect(evidence.views.map((view) => view.width)).toEqual([
-    360, 720, 1200, 1600,
-  ]);
+  expect(evidence.views.map((view) => view.width)).toEqual([2480]);
+  const committed = manifest.revisions[0];
+  if (!committed) throw new Error("Missing committed revision");
+  expect(evidence.views[0]?.image?.path).toBe(committed.image.path);
+  expect(evidence.views[0]?.image?.sha256).toBe(committed.image.sha256);
   for (const view of evidence.views) {
     if (!view.image || !view.warnings) throw new Error("Missing width render");
     expect(await sha256File(store.path(view.image.path))).toBe(

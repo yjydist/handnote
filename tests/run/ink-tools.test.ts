@@ -72,7 +72,6 @@ async function setup() {
     store,
     sourcePath: store.path(store.manifest.input.path),
     recorder: store.recorder,
-    width: 700,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   });

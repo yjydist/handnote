@@ -95,7 +95,6 @@ async function reviewed() {
   const revision = await fixture.store.commit(fixture.draft, {
     kind: "write",
     step: 1,
-    width: 700,
   });
   expect(revision.warnings.filter((warning) => warning.blocking)).toEqual([]);
   await fixture.store.review(2, async () => {});
@@ -407,7 +406,7 @@ describe("immutable ink dependency graph", () => {
     expect(store.manifest.reviewedRevision?.number).toBe(1);
     const next = await store.commit(
       { ...simpleDraft(), markdown: `![字](../assets/ink/${changed.id}.svg)` },
-      { kind: "revise", step: 3, width: 700 },
+      { kind: "revise", step: 3 },
     );
     if (!next.dependenciesSha256 || !revision.dependenciesSha256)
       throw new Error("Missing dependency digest");
@@ -513,7 +512,7 @@ describe("immutable ink dependency graph", () => {
     await expect(
       store.commit(
         { ...simpleDraft(), markdown: `![](../assets/ink/${other.id}.svg)` },
-        { kind: "revise", step: 3, width: 700 },
+        { kind: "revise", step: 3 },
       ),
     ).rejects.toMatchObject({ kind: "filesystem" });
     const duplicate = {
@@ -521,7 +520,7 @@ describe("immutable ink dependency graph", () => {
       markdown: `![](../assets/ink/${first.id}.svg) ![](../assets/ink/${composition.id}.svg)`,
     };
     await expect(
-      store.commit(duplicate, { kind: "revise", step: 3, width: 700 }),
+      store.commit(duplicate, { kind: "revise", step: 3 }),
     ).rejects.toMatchObject({ issues: [{ code: "ink_source_overlap" }] });
     for (const path of [
       "../assets/ink/../../input/redraw.svg",
@@ -531,7 +530,7 @@ describe("immutable ink dependency graph", () => {
       await expect(
         store.commit(
           { ...simpleDraft(), markdown: `![](${path})` },
-          { kind: "revise", step: 3, width: 700 },
+          { kind: "revise", step: 3 },
         ),
       ).rejects.toThrow();
     }
@@ -545,7 +544,6 @@ describe("immutable ink dependency graph", () => {
     const revision = await store.commit(simpleDraft(), {
       kind: "write",
       step: 1,
-      width: 700,
     });
     expect(revision.warnings).toContainEqual({
       code: "ink_missing",
@@ -579,7 +577,6 @@ describe("immutable ink dependency graph", () => {
     const revision = await store.commit(simpleDraft(), {
       kind: "write",
       step: 1,
-      width: 700,
     });
     const before = await readFile(store.path("run.json"));
     await RunStore.open(store.directory);

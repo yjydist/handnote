@@ -33,7 +33,7 @@ describe("configuration", () => {
     const config = await loadConfig(`${directory}/handnote.yaml`);
     expect(config.maxSteps).toBe(18);
     expect(config.maxInspectCalls).toBe(3);
-    expect(config.width).toBe(1600);
+    expect(config).not.toHaveProperty("width");
     expect(config.model.maxRetries).toBe(1);
     expect(config.model.timeoutMs).toBe(240_000);
     expect(config.toolMedia).toEqual({ maxEdge: 2048, jpegQuality: 85 });
@@ -46,6 +46,7 @@ describe("configuration", () => {
     "version: 1",
     "prompt:\n  file: prompt.md",
     "theme: clean",
+    "width: 1600",
     "fontFamily: sans-serif",
   ])("rejects unsupported configuration: %s", async (field) => {
     const directory = await temporary();

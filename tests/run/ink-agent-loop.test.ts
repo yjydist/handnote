@@ -39,7 +39,7 @@ async function setup(wide = false) {
         pen_color: -16777216,
         points: [
           { x: index * 30, y: 0, time: 0 },
-          { x: index * 30 + (wide ? 400 : 10), y: 20, time: 1 },
+          { x: index * 30 + (wide ? 1100 : 10), y: 20, time: 1 },
         ],
       })),
     ),
@@ -56,7 +56,6 @@ async function setup(wide = false) {
     store,
     recorder: store.recorder,
     sourcePath,
-    width: 720,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   });
@@ -82,7 +81,6 @@ test("v1 review keeps its original single-view model summary", async () => {
     store,
     recorder: store.recorder,
     sourcePath: store.path(store.manifest.input.path),
-    width: 720,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   });
@@ -100,7 +98,7 @@ test("v1 review keeps its original single-view model summary", async () => {
   );
 }, 30000);
 
-test.each(["review.json", "360", "360/note.png"])(
+test.each(["review.json", "directory"])(
   "ink review rejects linked output targets before authorizing review: %s",
   async (target) => {
     const { store, handlers, document } = await setup();
@@ -118,9 +116,11 @@ test.each(["review.json", "360", "360/note.png"])(
     const sentinel = `${outside}/sentinel`;
     await writeFile(sentinel, "untouched");
     const base = store.path("session/ink-reviews/revision-1/step-2");
-    await mkdir(`${base}/360`, { recursive: true });
-    if (target === "360") await rm(`${base}/360`, { recursive: true });
-    await symlink(target === "360" ? outside : sentinel, `${base}/${target}`);
+    await mkdir(base, { recursive: true });
+    if (target === "directory") {
+      await rm(base, { recursive: true });
+      await symlink(outside, base);
+    } else await symlink(sentinel, `${base}/${target}`);
     await expect(
       handlers.review_render({}, execution(2)),
     ).rejects.toMatchObject({ kind: "filesystem" });
@@ -267,7 +267,7 @@ test("offline model sees real media and rendered table counts before and after r
   expect(seen).toContain('"type":"image-data"');
   expect(seen).toContain(composed.id);
   expect(seen).toContain("pending-human-review");
-  expect(seen).toContain("360×");
+  expect(seen).toContain("A4 output: 2480×");
   const firstReview = JSON.stringify(
     model.doGenerateCalls[5]?.prompt.filter(
       (message) => message.role === "tool",
@@ -302,7 +302,13 @@ test("offline model sees real media and rendered table counts before and after r
   const media = events.filter(
     (event) => event.type === "tool.model_media.prepared",
   );
-  expect(media.length).toBeGreaterThanOrEqual(11);
+  expect(
+    [
+      ...new Set(
+        media.map((event) => (event.data as { purpose: string }).purpose),
+      ),
+    ].sort(),
+  ).toEqual(["compose_ink", "inspect_ink", "review_render", "select_ink"]);
   expect(JSON.stringify(media)).toContain("session/model-previews/");
   const measurements = events.filter(
     (event) => event.type === "tool.model_output.prepared",
@@ -321,7 +327,7 @@ test("offline model sees real media and rendered table counts before and after r
   await RunStore.open(store.directory);
 }, 60000);
 
-test("360 overflow returns actual previews and asset ID without authorizing finalization", async () => {
+test("A4 overflow returns actual previews and asset ID without authorizing finalization", async () => {
   const { store, handlers, document } = await setup(true);
   const asset = createInkFragment(document, {
     strokeIndices: [0],
@@ -335,7 +341,14 @@ test("360 overflow returns actual previews and asset ID without authorizing fina
   expect(written.ok).toBe(true);
   expect(
     store.manifest.revisions[0]?.warnings.filter((warning) => warning.blocking),
-  ).toEqual([]);
+  ).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        code: "ink_asset_too_wide",
+        assetId: asset.id,
+      }),
+    ]),
+  );
   await store.review(2, async () => {});
   expect(store.manifest.reviewedRevision?.number).toBe(1);
   const review = await handlers.review_render({}, execution(3));
@@ -350,7 +363,9 @@ test("360 overflow returns actual previews and asset ID without authorizing fina
     ]),
   });
   if (!review.ok) throw new Error("Missing preview");
-  expect(review.paths).toHaveLength(4);
+  const current = store.manifest.revisions[0];
+  if (!current) throw new Error("Missing committed A4 revision");
+  expect(review.paths).toEqual([store.path(current.image.path)]);
   expect(review.summary).toContain(asset.id);
   expect(review.summary).toContain(
     "Ink source coverage: 1/3 used; unusedStrokeIndices=[1,2]",

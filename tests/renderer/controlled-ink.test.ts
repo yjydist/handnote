@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { chromium, type Page } from "playwright";
 import sharp from "sharp";
 import {
+  a4Page,
   compileNoteMarkdown,
   type ImageResource,
   type InkImageMetadata,
@@ -46,12 +47,13 @@ function ink(
 }
 async function inspect<T>(
   htmlPath: string,
-  width: number,
   read: (page: Page) => Promise<T>,
 ): Promise<T> {
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await browser.newPage({
+      viewport: { width: a4Page.layoutWidth, height: 900 },
+    });
     await page.goto(pathToFileURL(htmlPath).href);
     await page.waitForFunction(
       () =>
@@ -99,9 +101,9 @@ test("controlled SVG images use heading, inline, list and diagram scale without 
   );
   expect(note.html).not.toContain("figcaption");
   expect(note.html).toContain('data-hn-reference-height="20"');
-  const result = await renderDocument(note, await temporary(), 720);
+  const result = await renderDocument(note, await temporary());
   expect(result.warnings).toEqual([]);
-  const images = await inspect(result.htmlPath, 720, geometry);
+  const images = await inspect(result.htmlPath, geometry);
   expect(images.map(({ width, height }) => [width, height])).toEqual([
     [192, 48],
     [80, 20],
@@ -121,8 +123,8 @@ test("controlled SVG images use heading, inline, list and diagram scale without 
   if (!title) throw new Error("Missing title image");
   const pixel = await sharp(result.imagePath)
     .extract({
-      left: Math.round(title.x + 5),
-      top: Math.round(title.y + 5),
+      left: Math.round(((title.x + 5) * a4Page.width) / a4Page.layoutWidth),
+      top: Math.round(((title.y + 5) * a4Page.width) / a4Page.layoutWidth),
       width: 1,
       height: 1,
     })
@@ -132,34 +134,33 @@ test("controlled SVG images use heading, inline, list and diagram scale without 
   expect([...pixel]).toEqual([0, 0, 0]);
 });
 
-test("mobile layout wraps between whole assets while preserving their explicit geometry", async () => {
-  const note = await compileNoteMarkdown("![first](first) ![second](second)", {
-    resolveImage: async (id) => ink(id, { width: 180 }),
-  });
-  const directory = await temporary();
-  const wide = await renderDocument(note, `${directory}/wide`, 720);
-  const narrow = await renderDocument(note, `${directory}/narrow`, 360);
-  expect(wide.warnings).toEqual([]);
-  expect(narrow.warnings).toEqual([]);
-  const wideImages = await inspect(wide.htmlPath, 720, geometry);
-  const narrowImages = await inspect(narrow.htmlPath, 360, geometry);
-  expect(wideImages[0]?.y).toBe(wideImages[1]?.y ?? -1);
-  expect(narrowImages[1]?.y).toBeGreaterThan(narrowImages[0]?.y ?? 0);
-  expect(narrowImages.map(({ width, height }) => [width, height])).toEqual([
+test("A4 layout wraps whole assets inside narrow containers without changing their geometry", async () => {
+  const note = await compileNoteMarkdown(
+    "![first](first) ![second](second)\n\n| A | B | C |\n| - | - | - |\n| ![third](third) ![fourth](fourth) | text | text |",
+    { resolveImage: async (id) => ink(id, { width: 180 }) },
+  );
+  const result = await renderDocument(note, await temporary());
+  expect(result.warnings).toEqual([]);
+  const images = await inspect(result.htmlPath, geometry);
+  expect(images).toHaveLength(4);
+  expect(images[0]?.y).toBe(images[1]?.y ?? -1);
+  expect(images[3]?.y).toBeGreaterThan(images[2]?.y ?? 0);
+  expect(images.map(({ width, height }) => [width, height])).toEqual([
+    [180, 20],
+    [180, 20],
     [180, 20],
     [180, 20],
   ]);
-  expect(narrowImages[0]?.x).toBe(36);
 });
 
 test("oversized assets block using the nearest content box and duplicates identify the asset", async () => {
   const note = await compileNoteMarkdown(
     "![paragraph](paragraph)\n\n- ![list](list)\n\n| A | B |\n| - | - |\n| ![cell](cell) | text |\n\n![again](paragraph)",
     {
-      resolveImage: async (id) => ink(id, { width: 400 }),
+      resolveImage: async (id) => ink(id, { width: 1000 }),
     },
   );
-  const result = await renderDocument(note, await temporary(), 360);
+  const result = await renderDocument(note, await temporary());
   const oversized = result.warnings.filter(
     (warning) => warning.code === "ink_asset_too_wide",
   );
@@ -170,19 +171,23 @@ test("oversized assets block using the nearest content box and duplicates identi
         warning.blocking &&
         warning.assetId &&
         warning.elementId &&
-        warning.contentPx === 400,
+        warning.contentPx === 1000,
     ),
   ).toBe(true);
-  expect(oversized[0]?.containerPx).toBe(288);
-  expect(oversized[1]?.containerPx).toBe(248);
-  expect(oversized[2]?.containerPx).toBeLessThan(144);
+  expect(oversized[0]?.containerPx).toBe(960);
+  expect(oversized[1]?.containerPx).toBeLessThan(
+    oversized[0]?.containerPx ?? 0,
+  );
+  expect(oversized[2]?.containerPx).toBeLessThan(
+    oversized[1]?.containerPx ?? 0,
+  );
   expect(
     result.warnings.find((warning) => warning.code === "duplicate_ink_asset"),
   ).toMatchObject({ blocking: true, assetId: "paragraph", elementId: "ink-4" });
-  const images = await inspect(result.htmlPath, 360, geometry);
+  const images = await inspect(result.htmlPath, geometry);
   expect(
     images.every(
-      (image) => image.width === 400 && image.height === 20 && image.loaded,
+      (image) => image.width === 1000 && image.height === 20 && image.loaded,
     ),
   ).toBe(true);
 });
@@ -233,7 +238,7 @@ test("invalid controlled metadata is rejected and Markdown cannot forge ink or S
   expect(note.html).not.toMatch(/<svg|<path|data-hn-ink|style=/);
 });
 
-test("raster image bytes, caption and established width styles are unchanged", async () => {
+test("raster image bytes, caption and A4 layout retain the original image contract", async () => {
   const png = await sharp({
     create: { width: 8, height: 4, channels: 4, background: "red" },
   })
@@ -245,10 +250,10 @@ test("raster image bytes, caption and established width styles are unchanged", a
   expect(note.html).toBe(
     `<figure data-hn-id="block-1"><img src="data:image/png;base64,${png.toString("base64")}" alt="caption"><figcaption>caption</figcaption></figure>`,
   );
-  const result = await renderDocument(note, await temporary(), 720);
+  const result = await renderDocument(note, await temporary());
   expect(result.warnings).toEqual([]);
   const html = await readFile(result.htmlPath, "utf8");
-  expect(html).toContain("body{padding:48px}.page{width:624px");
+  expect(html).toContain("body{padding:48px}.page{width:1104px");
   expect(html).not.toContain(".hn-ink-diagram");
   expect(html).not.toContain("body{padding:16px}");
 });
@@ -260,7 +265,7 @@ test("collapsed ink blocks acceptance while visible summary and sanitized hidden
       resolveImage: async (id) => ink(id),
     },
   );
-  const result = await renderDocument(note, await temporary(), 360);
+  const result = await renderDocument(note, await temporary());
   const invisible = result.warnings.filter(
     (warning) => warning.code === "ink_asset_not_visible",
   );

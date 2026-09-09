@@ -40,7 +40,6 @@ describe("recovery path safety", () => {
       const tools = createTestHandlers({
         store,
         sourcePath: store.path("input/original.png"),
-        width: 700,
         maxSteps: 8,
         maxInspectCalls: 3,
         toolMedia: { maxEdge: 2048, jpegQuality: 85 },
@@ -146,7 +145,7 @@ async function reviewedFigure() {
       ...simpleDraft(),
       markdown: "# Figure\n\n![](../assets/figures/figure-001.png)",
     },
-    { kind: "write", step: 1, width: 700 },
+    { kind: "write", step: 1 },
   );
   await store.review(2, async () => {});
   return { store, figure, copy };

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import sharp from "sharp";
+import { a4Page } from "../../src/renderer/index.ts";
 import { compileNoteMarkdown } from "../../src/run/markdown.ts";
 import {
   isAllowedRenderRequest,
@@ -46,7 +47,7 @@ describe("renderer", () => {
         `import { compileNoteMarkdown } from ${JSON.stringify(compiler)};
        import { renderDocument } from ${JSON.stringify(renderer)};
        const note = await compileNoteMarkdown("# 中文\\n\\n$x$\\n\\n\`\`\`mermaid\\ngraph TD\\n A --> B\\n\`\`\`", {});
-       const result = await renderDocument(note, "render", 700);
+       const result = await renderDocument(note, "render");
        console.log(JSON.stringify(result));`,
       ],
       { cwd: directory, stdout: "pipe", stderr: "pipe" },
@@ -58,7 +59,7 @@ describe("renderer", () => {
     ]);
     expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
     expect(JSON.parse(stdout)).toMatchObject({
-      width: 700,
+      width: a4Page.width,
       warnings: [],
       structure: { headings: 1, equations: 1, diagrams: 1 },
     });
@@ -110,12 +111,13 @@ ${figureMarkdown}
     const note = await compileNoteMarkdown(markdown, {
       runDirectory: directory,
     });
-    const result = await renderDocument(note, `${directory}/render-1`, 900);
-    expect(result.width).toBe(900);
+    const result = await renderDocument(note, `${directory}/render-1`);
+    expect(result.width).toBe(a4Page.width);
     expect(result.height).toBeGreaterThan(0);
     expect(await sharp(result.imagePath).metadata()).toMatchObject({
-      width: 900,
+      width: a4Page.width,
       height: result.height,
+      density: a4Page.dpi,
     });
     expect(result.structure).toEqual({
       headings: 2,
@@ -144,7 +146,7 @@ ${figureMarkdown}
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({
-        viewport: { width: 900, height: 900 },
+        viewport: { width: a4Page.layoutWidth, height: 900 },
       });
       await page.goto(pathToFileURL(result.htmlPath).href);
       await page.waitForFunction(
@@ -201,14 +203,14 @@ ${figureMarkdown}
       "## 原文标题\n\n这是正文[^1]。\n\n[^1]: 原文脚注。",
       { runDirectory: directory },
     );
-    const result = await renderDocument(note, `${directory}/render-1`, 700);
+    const result = await renderDocument(note, `${directory}/render-1`);
     expect(result.warnings).toEqual([]);
-    expect((await sharp(result.imagePath).metadata()).width).toBe(700);
+    expect((await sharp(result.imagePath).metadata()).width).toBe(a4Page.width);
 
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({
-        viewport: { width: 700, height: 900 },
+        viewport: { width: a4Page.layoutWidth, height: 900 },
       });
       await page.goto(pathToFileURL(result.htmlPath).href);
       await page.waitForFunction(
@@ -256,8 +258,8 @@ ${figureMarkdown}
     const note = await compileNoteMarkdown(simpleMarkdown(), {
       runDirectory,
     });
-    const result = await renderDocument(note, `${runDirectory}/render-1`, 700);
-    expect(result.width).toBe(700);
+    const result = await renderDocument(note, `${runDirectory}/render-1`);
+    expect(result.width).toBe(a4Page.width);
     expect(await Bun.file(result.imagePath).exists()).toBe(true);
   }, 30_000);
 
@@ -271,7 +273,6 @@ ${figureMarkdown}
     const tools = createTestHandlers({
       store,
       sourcePath: `${directory}/source.png`,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
@@ -352,7 +353,7 @@ ${figureMarkdown}
       "正文。\n\n```mermaid\nnot a diagram directive at all\n```\n",
       { runDirectory: directory },
     );
-    const result = await renderDocument(note, `${directory}/render-1`, 700);
+    const result = await renderDocument(note, `${directory}/render-1`);
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -378,7 +379,7 @@ ${figureMarkdown}
     note.html += `<iframe src="${probeUrl}"></iframe>`;
     try {
       await expect(
-        renderDocument(note, `${directory}/render-1`, 700),
+        renderDocument(note, `${directory}/render-1`),
       ).rejects.toMatchObject({
         issues: [expect.objectContaining({ code: "external_resource" })],
       });
@@ -420,9 +421,9 @@ describe("standard rendering boundaries", () => {
       `<picture><source srcset="${local} 1x, ${local} 2x"><img src="${local}"></picture>`,
       { runDirectory },
     );
-    const render = await renderDocument(note, `${runDirectory}/render-1`, 700);
+    const render = await renderDocument(note, `${runDirectory}/render-1`);
     expect(render.warnings).toEqual([]);
-    expect((await sharp(render.imagePath).metadata()).width).toBe(700);
+    expect((await sharp(render.imagePath).metadata()).width).toBe(a4Page.width);
   }, 30_000);
 
   test("Mermaid strict mode accepts links while external diagram media is a repairable resource error", async () => {
@@ -431,50 +432,91 @@ describe("standard rendering boundaries", () => {
       '```mermaid\nflowchart TD\n a["Safe <b>label</b>"]\n click a "https://example.test"\n```',
       { runDirectory },
     );
-    const render = await renderDocument(
-      linked,
-      `${runDirectory}/render-1`,
-      700,
-    );
+    const render = await renderDocument(linked, `${runDirectory}/render-1`);
     expect(render.warnings).toEqual([]);
     const external = await compileNoteMarkdown(
       '```mermaid\nflowchart TD\n a@{ img: "https://example.test/remote.png", label: "Remote" }\n```',
       { runDirectory },
     );
     await expect(
-      renderDocument(external, `${runDirectory}/render-2`, 700),
+      renderDocument(external, `${runDirectory}/render-2`),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ code: "external_resource" })],
     });
   }, 30_000);
 
-  test("preserves configured screenshot width when content overflows", async () => {
+  test("preserves A4 screenshot width when content overflows", async () => {
     const directory = await temporary();
     const note = await compileNoteMarkdown(`$${"x".repeat(250)}$`, {
       runDirectory: directory,
     });
-    const render = await renderDocument(note, `${directory}/render-1`, 700);
+    const render = await renderDocument(note, `${directory}/render-1`);
     expect(
       render.warnings.some(
         (warning) => warning.blocking && warning.code.includes("overflow"),
       ),
     ).toBe(true);
-    expect((await sharp(render.imagePath).metadata()).width).toBe(700);
+    expect((await sharp(render.imagePath).metadata()).width).toBe(a4Page.width);
   }, 30_000);
 
-  test("stitches long images at the configured width", async () => {
+  test("stitches native A4 screenshots without gaps, repeated rows, or raster enlargement", async () => {
     const directory = await temporary();
-    const note = await compileNoteMarkdown(
-      Array.from({ length: 260 }, (_, index) => `Paragraph ${index}.`).join(
-        "\n\n",
-      ),
-      { runDirectory: directory },
-    );
-    const render = await renderDocument(note, `${directory}/render-1`, 700);
+    const note = await compileNoteMarkdown("# Long page", {
+      runDirectory: directory,
+    });
+    note.html +=
+      '<div style="height:6400px;background:repeating-linear-gradient(to bottom,#123456 0px,#123456 7px,#abcdef 7px,#abcdef 15px)"></div>';
+    const render = await renderDocument(note, `${directory}/render`);
     const metadata = await sharp(render.imagePath).metadata();
-    expect(render.height).toBeGreaterThan(12_000);
-    expect(metadata.width).toBe(700);
-    expect(metadata.height).toBe(render.height);
+    expect(metadata).toMatchObject({
+      width: a4Page.width,
+      height: render.height,
+      density: a4Page.dpi,
+    });
+    expect(render.height).toBeGreaterThan(
+      (6400 * a4Page.width) / a4Page.layoutWidth,
+    );
     expect(render.warnings).toEqual([]);
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({
+        viewport: { width: a4Page.layoutWidth, height: 900 },
+        deviceScaleFactor: a4Page.width / a4Page.layoutWidth,
+      });
+      await page.goto(pathToFileURL(render.htmlPath).href);
+      await page.waitForFunction(
+        () =>
+          (globalThis as typeof globalThis & { __handnoteReady?: boolean })
+            .__handnoteReady === true,
+      );
+      // Sample around the stitched boundary against an independent native browser screenshot.
+      const y = 5985;
+      const reference = await page.screenshot({
+        type: "png",
+        scale: "device",
+        fullPage: true,
+        clip: { x: 0, y, width: a4Page.layoutWidth, height: 90 },
+      });
+      const expected = await sharp(reference)
+        .extract({ left: 800, top: 0, width: 8, height: 186 })
+        .removeAlpha()
+        .raw()
+        .toBuffer();
+      const actual = await sharp(render.imagePath)
+        .extract({
+          left: 800,
+          top: (y * a4Page.width) / a4Page.layoutWidth,
+          width: 8,
+          height: 186,
+        })
+        .removeAlpha()
+        .raw()
+        .toBuffer();
+      expect(actual.equals(expected)).toBe(true);
+      expect(new Set(actual).size).toBeGreaterThan(3);
+    } finally {
+      await browser.close();
+    }
   }, 30_000);
 });

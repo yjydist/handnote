@@ -386,7 +386,7 @@ export class RunStore {
 
   async commit(
     draft: unknown,
-    options: { kind: "write" | "revise"; step: number; width: number },
+    options: { kind: "write" | "revise"; step: number },
   ): Promise<StoredRevision> {
     return this.transaction(async () => {
       const manifest = this.manifest;
@@ -448,11 +448,7 @@ export class RunStore {
       let promoted = false;
       try {
         await atomicWrite(this.path(`${temporary}/note.md`), parsed.markdown);
-        const render = await renderDocument(
-          note,
-          this.path(temporary),
-          options.width,
-        );
+        const render = await renderDocument(note, this.path(temporary));
         await flushFile(this.path(`${temporary}/note.png`));
         const artifact = async (name: string): Promise<Artifact> => ({
           path: `${directory}/${name}`,

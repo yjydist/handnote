@@ -28,7 +28,7 @@ async function setup() {
 }
 async function reviewed() {
   const store = await setup();
-  await store.commit(simpleDraft(), { kind: "write", step: 1, width: 700 });
+  await store.commit(simpleDraft(), { kind: "write", step: 1 });
   await store.review(2, async () => {});
   return store;
 }
@@ -84,7 +84,7 @@ describe("disk revision contract", () => {
       revisions: [],
     });
     expect(existsSync(store.path("output"))).toBe(false);
-    await store.commit(simpleDraft(), { kind: "write", step: 1, width: 700 });
+    await store.commit(simpleDraft(), { kind: "write", step: 1 });
     await store.review(2, async () => {});
     const before = store.manifest;
     const first = before.revisions[0];
@@ -107,7 +107,7 @@ describe("disk revision contract", () => {
     });
     await recovered.commit(
       { ...simpleDraft(), markdown: "# Second\n" },
-      { kind: "revise", step: 3, width: 700 },
+      { kind: "revise", step: 3 },
     );
     expect(recovered.manifest.currentRevision).toBe(2);
     expect(recovered.manifest.reviewedRevision).toBeUndefined();
@@ -129,7 +129,7 @@ describe("disk revision contract", () => {
     await expect(store.finalize(1)).rejects.toMatchObject({
       code: "not_ready",
     });
-    await store.commit(simpleDraft(), { kind: "write", step: 1, width: 700 });
+    await store.commit(simpleDraft(), { kind: "write", step: 1 });
     await expect(store.review(1, async () => {})).rejects.toMatchObject({
       code: "not_ready",
     });
@@ -168,7 +168,7 @@ describe("disk revision contract", () => {
       manifest.final,
     );
     await expect(
-      store.commit(simpleDraft(), { kind: "revise", step: 4, width: 700 }),
+      store.commit(simpleDraft(), { kind: "revise", step: 4 }),
     ).rejects.toMatchObject({ code: "already_finalized" });
   });
 
@@ -176,7 +176,7 @@ describe("disk revision contract", () => {
     const store = await setup();
     const revision = await store.commit(
       { ...simpleDraft(), markdown: "```mermaid\nnot a diagram\n```" },
-      { kind: "write", step: 1, width: 700 },
+      { kind: "write", step: 1 },
     );
     expect(revision.warnings.some((warning) => warning.blocking)).toBe(true);
     await store.review(2, async () => {});
@@ -234,7 +234,6 @@ describe("disk revision contract", () => {
     const revision = await store.commit(draft, {
       kind: "write",
       step: 1,
-      width: 700,
     });
     expect(revision.assets).toEqual([
       {
@@ -276,7 +275,7 @@ describe("disk revision contract", () => {
       .toFile(figure);
     await store.commit(
       { ...simpleDraft(), markdown: "![](../assets/figures/a.png)" },
-      { kind: "write", step: 1, width: 700 },
+      { kind: "write", step: 1 },
     );
     await store.review(2, async () => {});
     await fs.appendFile(figure, "changed");
@@ -288,7 +287,7 @@ describe("disk revision contract", () => {
 
   test("a concurrent revision waits for review preparation and then invalidates that review", async () => {
     const store = await setup();
-    await store.commit(simpleDraft(), { kind: "write", step: 1, width: 700 });
+    await store.commit(simpleDraft(), { kind: "write", step: 1 });
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -305,7 +304,6 @@ describe("disk revision contract", () => {
     const revise = store.commit(simpleDraft(), {
       kind: "revise",
       step: 3,
-      width: 700,
     });
     expect(store.manifest.currentRevision).toBe(1);
     release();
@@ -322,7 +320,7 @@ describe("disk revision contract", () => {
     const results = await Promise.allSettled([
       reviseFirst.commit(
         { ...simpleDraft(), markdown: "New" },
-        { kind: "revise", step: 3, width: 700 },
+        { kind: "revise", step: 3 },
       ),
       reviseFirst.finalize(3),
     ]);
@@ -338,7 +336,6 @@ describe("disk revision contract", () => {
       finalizeFirst.commit(simpleDraft(), {
         kind: "revise",
         step: 3,
-        width: 700,
       }),
     ]);
     expect(reverse.map((result) => result.status)).toEqual([
@@ -361,7 +358,7 @@ describe("artifact transaction failures", () => {
         return open(path, ...args);
       });
       await expect(
-        store.commit(simpleDraft(), { kind: "revise", step: 3, width: 700 }),
+        store.commit(simpleDraft(), { kind: "revise", step: 3 }),
       ).rejects.toMatchObject({ kind: "filesystem" });
       expect(await fs.readFile(store.path("run.json"), "utf8")).toBe(before);
       expect(await fs.readdir(store.path("intermediate/revisions"))).toEqual([
@@ -380,7 +377,7 @@ describe("artifact transaction failures", () => {
       },
     );
     await expect(
-      store.commit(simpleDraft(), { kind: "revise", step: 3, width: 700 }),
+      store.commit(simpleDraft(), { kind: "revise", step: 3 }),
     ).rejects.toMatchObject({ kind: "filesystem" });
     expect(store.manifest).toEqual(before);
     expect(await fs.readdir(store.path("intermediate/revisions"))).toEqual([
@@ -397,7 +394,7 @@ describe("artifact transaction failures", () => {
       const previous = before.revisions[0];
       if (!previous) throw new Error("Missing revision");
       spyOn(renderer, "renderDocument").mockImplementation(
-        async (note, directory, width) => {
+        async (note, directory) => {
           const htmlPath = `${directory}/note.html`,
             imagePath = `${directory}/note.png`;
           await fs.copyFile(store.path(previous.html.path), htmlPath);
@@ -405,7 +402,7 @@ describe("artifact transaction failures", () => {
           return {
             htmlPath,
             imagePath,
-            width,
+            width: previous.width,
             height: previous.height,
             warnings: note.warnings,
             structure: note.structure,
@@ -422,7 +419,7 @@ describe("artifact transaction failures", () => {
         return rename(from, to);
       });
       await expect(
-        store.commit(simpleDraft(), { kind: "revise", step: 3, width: 700 }),
+        store.commit(simpleDraft(), { kind: "revise", step: 3 }),
       ).rejects.toMatchObject({ kind: "filesystem" });
       expect(store.manifest).toEqual(before);
       expect(await fs.readdir(store.path("intermediate/revisions"))).toEqual([
@@ -473,7 +470,7 @@ describe("artifact transaction failures", () => {
       const store=await RunStore.open(process.env.HANDNOTE_TEST_RUN,{mode:"recover"});
       const record=store.recorder.recordRevision.bind(store.recorder);
       store.recorder.recordRevision=(input)=>{const event=record(input);if(input.type===${JSON.stringify(stage === "revision" ? "document.revision.committed" : "note.finalized")}) process.exit(23);return event;};
-      ${stage === "revision" ? 'await store.commit({markdown:"Second",audit:{}},{kind:"revise",step:3,width:700});' : "await store.finalize(3);"}`;
+      ${stage === "revision" ? 'await store.commit({markdown:"Second",audit:{}},{kind:"revise",step:3});' : "await store.finalize(3);"}`;
       const child = Bun.spawn([process.execPath, "-e", code], {
         env: { ...process.env, HANDNOTE_TEST_RUN: store.directory },
         stdout: "pipe",
@@ -675,7 +672,7 @@ describe("session and recovery", () => {
         const previous = store.manifest.revisions[0];
         if (!previous) throw new Error("Missing revision");
         spyOn(renderer, "renderDocument").mockImplementation(
-          async (note, directory, width) => {
+          async (note, directory) => {
             const htmlPath = `${directory}/note.html`;
             const imagePath = `${directory}/note.png`;
             await fs.copyFile(store.path(previous.html.path), htmlPath);
@@ -683,7 +680,7 @@ describe("session and recovery", () => {
             return {
               htmlPath,
               imagePath,
-              width,
+              width: previous.width,
               height: previous.height,
               warnings: note.warnings,
               structure: note.structure,
@@ -706,7 +703,7 @@ describe("session and recovery", () => {
         operation === "revision"
           ? store.commit(
               { ...simpleDraft(), markdown: "# 未提交的修订\n\n这是正文。" },
-              { kind: "revise", step: 3, width: 700 },
+              { kind: "revise", step: 3 },
             )
           : operation === "review"
             ? store.review(3, async () => {})

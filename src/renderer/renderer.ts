@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { parseSrcset } from "srcset";
 import { RenderError } from "./errors.ts";
 import { type CompiledNote, MarkdownValidationError } from "./markdown.ts";
+import { a4Page } from "./page.ts";
 import type { LayoutWarning, NoteStructure } from "./render-metadata.ts";
 import { atomicWrite } from "./write-artifact.ts";
 
@@ -61,7 +62,8 @@ async function katexCss(): Promise<string> {
   return css;
 }
 
-async function buildHtml(note: CompiledNote, width: number): Promise<string> {
+async function buildHtml(note: CompiledNote): Promise<string> {
+  const width = a4Page.layoutWidth;
   const [font, math, mermaid] = await Promise.all([
     fontCss(),
     katexCss(),
@@ -74,12 +76,8 @@ async function buildHtml(note: CompiledNote, width: number): Promise<string> {
   const inkCss = note.html.includes("data-hn-ink=")
     ? ".page{font-size:20px}.hn-ink-diagram{font-size:20px;line-height:1.75}.hn-ink-diagram>img{margin-inline:auto}"
     : "";
-  const narrowCss =
-    width < 640
-      ? `body{padding:16px}.page{width:${width - 32}px;padding:20px}`
-      : "";
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=${width}"><style>${font}${math}
-*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}:where(.page)>*{margin:18px 0}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre:not(.mermaid){white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0}${inkCss}${narrowCss}</style></head><body><main class="${title}">${note.html}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
+*{box-sizing:border-box}html,body{margin:0;width:${width}px;background:#edf1f4;color:#17212b;font-family:'Handnote Noto Sans SC',sans-serif}body{padding:48px}.page{width:${width - 96}px;background:#fff;border-radius:18px;padding:64px 72px;box-shadow:0 12px 40px #17212b18;overflow:visible}:where(.page)>*{margin:18px 0}.page:not(.has-title)>section:first-of-type>h2:first-child{margin-top:0}h1{font-size:48px;line-height:1.2;margin:0 0 20px}h2{font-size:32px;border-bottom:2px solid #e7edf2;padding-bottom:10px;margin-top:42px}h3{font-size:26px}h4,h5,h6{font-size:21px}p,li,td,th{font-size:20px;line-height:1.75;overflow-wrap:anywhere}blockquote{border-left:6px solid #5d88b3;background:#eef6ff;padding:18px 24px;border-radius:8px;margin:18px 0}table{border-collapse:collapse;width:100%;table-layout:fixed}th,td{border:1px solid #cfdae3;padding:12px;vertical-align:top}th{background:#f3f6f8}figure{text-align:center}img{max-width:100%;height:auto}figcaption,small{display:block;color:#607282;margin-top:8px}.mermaid{display:flex;justify-content:center;white-space:pre-wrap}.mermaid svg{max-width:100%;height:auto}.katex-display{overflow:visible;overflow-wrap:anywhere}pre:not(.mermaid){white-space:pre-wrap;background:#f5f5f5;padding:16px;border-radius:8px;overflow-wrap:anywhere}pre code{background:transparent;padding:0}code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.9em;background:#f3f6f8;padding:2px 5px;border-radius:4px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap;border:0}${inkCss}</style></head><body><main class="${title}">${note.html}</main><script>${mermaid}</script><script>window.__handnoteReady=false;window.__handnoteMermaidError='';(async()=>{try{mermaid.initialize({startOnLoad:false,securityLevel:'strict',theme:'neutral'});await mermaid.run({querySelector:'.mermaid'});}catch(error){window.__handnoteMermaidError=error instanceof Error?error.message:String(error);}finally{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));window.__handnoteReady=true;}})();</script></body></html>`;
 }
 
 export function isAllowedRenderRequest(
@@ -93,15 +91,16 @@ async function screenshotTall(
   browser: Browser,
   htmlPath: string,
   imagePath: string,
-  width: number,
 ): Promise<{
   width: number;
   height: number;
   warnings: LayoutWarning[];
 }> {
+  const width = a4Page.layoutWidth;
+  const deviceScaleFactor = a4Page.width / width;
   const context = await browser.newContext({
     viewport: { width, height: 900 },
-    deviceScaleFactor: 1,
+    deviceScaleFactor,
   });
   const documentUrl = pathToFileURL(htmlPath).href;
   const blockedRequests = new Set<string>();
@@ -214,7 +213,7 @@ async function screenshotTall(
     if (documentOverflow > 1)
       warnings.push({
         code: "horizontal_overflow",
-        message: `Document content is ${documentOverflow}px wider than the configured ${width}px output`,
+        message: `Document content is ${documentOverflow}px wider than the ${width}px page layout`,
         blocking: true,
         axis: "horizontal",
         overflowPx: documentOverflow,
@@ -282,60 +281,70 @@ async function screenshotTall(
           "Rendered content requires non-inline media; use captured local figures instead",
       },
     ]);
-  const segmentHeight = 12_000;
-  if (result.height <= segmentHeight) {
-    await page.screenshot({
-      path: imagePath,
+  // 15 logical pixels map to 31 device pixels, keeping every seam on a pixel boundary.
+  const segmentHeight = 6_000;
+  const parts: Array<{ input: Buffer; top: number; left: number }> = [];
+  let imageHeight = 0;
+  for (let y = 0; y < result.height; y += segmentHeight) {
+    const height = Math.min(segmentHeight, result.height - y);
+    const input = await page.screenshot({
+      type: "png",
+      scale: "device",
       fullPage: true,
-      clip: { x: 0, y: 0, width, height: result.height },
+      clip: { x: 0, y, width, height },
     });
-  } else {
-    const parts: Array<{ input: Buffer; top: number; left: number }> = [];
-    for (let y = 0; y < result.height; y += segmentHeight) {
-      const height = Math.min(segmentHeight, result.height - y);
-      const input = await page.screenshot({
-        type: "png",
-        fullPage: true,
-        clip: { x: 0, y, width, height },
-      });
-      parts.push({ input, top: y, left: 0 });
-    }
-    await sharp({
-      create: {
-        width,
-        height: result.height,
-        channels: 4,
-        background: "#ffffff",
-      },
-    })
-      .composite(parts)
-      .png()
-      .toFile(imagePath);
+    const metadata = await sharp(input).metadata();
+    if (metadata.width !== a4Page.width || !metadata.height)
+      throw new Error("Screenshot dimensions do not match the A4 output");
+    if (
+      height === segmentHeight &&
+      metadata.height !== Math.round(segmentHeight * deviceScaleFactor)
+    )
+      throw new Error(
+        "Screenshot segment does not end on the expected device pixel",
+      );
+    parts.push({ input, top: imageHeight, left: 0 });
+    imageHeight += metadata.height;
   }
+  const first = parts[0];
+  if (!first) throw new Error("Document has no screenshot area");
+  const output =
+    parts.length === 1
+      ? sharp(first.input)
+      : sharp({
+          create: {
+            width: a4Page.width,
+            height: imageHeight,
+            channels: 4,
+            background: "#ffffff",
+          },
+        }).composite(parts);
+  await output.withDensity(a4Page.dpi).png().toFile(imagePath);
+  const metadata = await sharp(imagePath).metadata();
+  if (metadata.width !== a4Page.width || metadata.height !== imageHeight)
+    throw new Error("Rendered image dimensions do not match its screenshots");
   await page.close();
   await context.close();
-  return result;
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    warnings: result.warnings,
+  };
 }
 
 export async function renderDocument(
   note: CompiledNote,
   directory: string,
-  width: number,
 ): Promise<RenderResult> {
   const warnings: LayoutWarning[] = [...note.warnings];
   const htmlPath = `${directory}/note.html`;
   const imagePath = `${directory}/note.png`;
   let browser: Browser | undefined;
   try {
-    const html = await buildHtml(note, width);
+    const html = await buildHtml(note);
     await atomicWrite(htmlPath, html);
     browser = await chromium.launch({ headless: true });
-    const screenshot = await screenshotTall(
-      browser,
-      htmlPath,
-      imagePath,
-      width,
-    );
+    const screenshot = await screenshotTall(browser, htmlPath, imagePath);
     warnings.push(...screenshot.warnings);
     return {
       htmlPath,

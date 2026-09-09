@@ -12,6 +12,7 @@ export {
   MarkdownValidationError,
   maxMarkdownLength,
 } from "./markdown.ts";
+export { a4Page } from "./page.ts";
 export type { LayoutWarning, NoteStructure } from "./render-metadata.ts";
 export { layoutWarningSchema, noteStructureSchema } from "./render-metadata.ts";
 export type { RenderResult } from "./renderer.ts";

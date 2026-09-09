@@ -223,7 +223,6 @@ describe("image inspection", () => {
     const tools = createTestHandlers({
       store,
       sourcePath: source,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
@@ -306,7 +305,6 @@ describe("image inspection", () => {
     const tools = createTestHandlers({
       store,
       sourcePath: source,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 1,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
@@ -331,7 +329,7 @@ describe("image inspection", () => {
     if (!before.ok) expect(before.error.message).toContain("write_note");
     await store.commit(
       { markdown: "正文", audit: {} },
-      { kind: "write", step: 1, width: 700 },
+      { kind: "write", step: 1 },
     );
     const after = await execute(
       { regions: [{ x: 0.4, y: 0, width: 0.5, height: 0.5 }] },
@@ -353,7 +351,6 @@ describe("image inspection", () => {
     const tools = createTestHandlers({
       store,
       sourcePath: source,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 1,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },

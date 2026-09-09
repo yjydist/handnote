@@ -131,7 +131,7 @@ async function writeRunInputs(
     .toFile(inputPath);
   await writeFile(
     `${directory}/config.yaml`,
-    `model:\n  baseUrl: ${baseUrl}\n  apiKey: ${JSON.stringify(apiKey)}\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nmaxSteps: 8\nwidth: 700\n`,
+    `model:\n  baseUrl: ${baseUrl}\n  apiKey: ${JSON.stringify(apiKey)}\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nmaxSteps: 8\n`,
   );
   return inputPath;
 }
@@ -860,7 +860,7 @@ describe("run controller", () => {
     try {
       await writeFile(
         `${directory}/config.yaml`,
-        `model:\n  baseUrl: ${server.url}v1\n  apiKey: super-secret-offline-key\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nmaxSteps: 8\nwidth: 700\nsaveIntermediateImages: false\n`,
+        `model:\n  baseUrl: ${server.url}v1\n  apiKey: super-secret-offline-key\n  name: offline\n  timeoutMs: 5000\n  maxRetries: 0\nmaxSteps: 8\nsaveIntermediateImages: false\n`,
       );
       const result = await executeRun(
         inputPath,

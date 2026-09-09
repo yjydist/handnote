@@ -12,10 +12,9 @@ export { isAllowedRenderRequest } from "../renderer/index.ts";
 export async function renderDocument(
   note: CompiledNote,
   directory: string,
-  width: number,
 ): Promise<RenderResult> {
   try {
-    return await render(note, directory, width);
+    return await render(note, directory);
   } catch (error) {
     if (error instanceof RenderError)
       throw new HandnoteError(error.message, error.kind, false, {

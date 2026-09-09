@@ -160,7 +160,6 @@ export async function executePreparedRun(
       const handlers = createHandnoteHandlers({
         store,
         sourcePath,
-        width: config.width,
         maxInspectCalls: config.maxInspectCalls,
         toolMedia: config.toolMedia,
         recorder,

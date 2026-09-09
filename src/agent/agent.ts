@@ -80,7 +80,7 @@ export async function runAgent(options: {
             {
               type: "text",
               text: options.handlers.ink
-                ? "Rearrange this entire note using its complete original ink trajectories. Start with inspect_ink and select/combine the original handwriting yourself. Preserve every meaningful item and visual relationship; use handwriting as the main content, then review all output widths and finalize. All judgments remain pending-human-review."
+                ? "Rearrange this entire note using its complete original ink trajectories. Start with inspect_ink and select/combine the original handwriting yourself. Preserve every meaningful item and visual relationship; use handwriting as the main content, then review the full A4 output and finalize. All judgments remain pending-human-review."
                 : "Digitize every meaningful note item from this single source image into a faithful electronic note. Follow the configured tool protocol; do not summarize or describe the page, and finalize only after a later-step source-to-render review.",
             },
             {

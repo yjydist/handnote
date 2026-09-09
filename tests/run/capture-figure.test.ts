@@ -36,7 +36,6 @@ describe("capture_figure tool", () => {
     const tools = createTestHandlers({
       store,
       sourcePath: source,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },
@@ -96,7 +95,6 @@ describe("capture_figure tool", () => {
     const tools = createTestHandlers({
       store,
       sourcePath: source,
-      width: 700,
       maxSteps: 18,
       maxInspectCalls: 3,
       toolMedia: { maxEdge: 2048, jpegQuality: 85 },

@@ -10,7 +10,6 @@ const rawConfigSchema = z
     model: modelConfigSchema,
     maxSteps: z.int().min(2).max(50).default(18),
     maxInspectCalls: z.int().min(1).max(8).default(3),
-    width: z.int().min(640).max(4096).default(1600),
     toolMedia: z
       .object({
         maxEdge: z.int().min(640).max(4096).default(2048),
@@ -44,7 +43,7 @@ export async function loadConfig(path: string): Promise<HandnoteConfig> {
     const retiredFields = result.error.issues.flatMap((issue) =>
       issue.code === "unrecognized_keys" && issue.path.length === 0
         ? issue.keys.filter((key) =>
-            ["prompt", "theme", "fontFamily"].includes(key),
+            ["prompt", "theme", "fontFamily", "width"].includes(key),
           )
         : [],
     );

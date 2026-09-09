@@ -37,7 +37,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
   const handlers = createHandnoteHandlers({
     store,
     sourcePath,
-    width: 700,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
     recorder,
@@ -80,7 +79,6 @@ test("runs an offline Mastra media tool loop and stops immediately after valid f
     },
     maxSteps: 10,
     maxInspectCalls: 3,
-    width: 700,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },
     saveIntermediateImages: true,
     configPath: `${directory}/config.yaml`,

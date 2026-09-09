@@ -37,7 +37,6 @@ async function setup(directory: string) {
   const tools = createTestHandlers({
     store,
     sourcePath: source,
-    width: 700,
     maxSteps: 18,
     maxInspectCalls: 3,
     toolMedia: { maxEdge: 2048, jpegQuality: 85 },

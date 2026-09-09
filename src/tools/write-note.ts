@@ -28,7 +28,6 @@ export async function commitNoteDraft(
     const revision = await context.store.commit(draft, {
       kind,
       step: execution.step,
-      width: context.width,
     });
     return {
       ok: true,

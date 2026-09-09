@@ -20,7 +20,6 @@ const recorder = store.recorder;
 const handlers = createHandnoteHandlers({
   store,
   sourcePath,
-  width: 700,
   maxInspectCalls: 3,
   toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   recorder,
@@ -42,7 +41,6 @@ const config: HandnoteConfig = {
   },
   maxSteps: 3,
   maxInspectCalls: 3,
-  width: 700,
   toolMedia: { maxEdge: 2048, jpegQuality: 85 },
   saveIntermediateImages: true,
   configPath: `${directory}/config.yaml`,

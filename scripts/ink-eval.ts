@@ -3,12 +3,11 @@ import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig } from "../src/config.ts";
 import { loadPrompt } from "../src/prompt/index.ts";
+import { a4Page } from "../src/renderer/page.ts";
 import { safeErrorMetadata } from "../src/run/errors.ts";
 import { loadInkLibrary } from "../src/run/ink-assets.ts";
 import type { RunResult } from "../src/run/manifest.ts";
-import { compileNoteMarkdown } from "../src/run/markdown.ts";
 import { redact } from "../src/run/redact.ts";
-import { renderDocument } from "../src/run/renderer.ts";
 import {
   executePreparedRun,
   type PreparedRunOptions,
@@ -17,7 +16,6 @@ import {
 import { readSession, type SessionEvent } from "../src/run/session.ts";
 import { RunStore } from "../src/run/store.ts";
 import { atomicWrite, sha256, sha256File } from "../src/run/utils.ts";
-import { inkReviewWidths } from "../src/tools/review-render.ts";
 
 const root = resolve(import.meta.dir, "..");
 // Only source identities belong here: no historical excerpts, OCR, or fragment answers.
@@ -95,31 +93,13 @@ export async function collectFullPageEvidence(result: RunResult) {
     sha256: await sha256File(path),
   });
   if (revision) {
-    const note = await compileNoteMarkdown(revision.text, {
-      runDirectory: store.directory,
-      manifest: store.manifest,
+    views.push({
+      width: revision.width,
+      height: revision.height,
+      image: await media(store.path(revision.image.path), "image/png"),
+      html: await media(store.path(revision.html.path), "text/html"),
+      warnings: revision.warnings,
     });
-    for (const width of inkReviewWidths) {
-      const destination = `experiment/renders/revision-${revision.number}/${width}`;
-      try {
-        store.path(`${destination}/note.html`);
-        store.path(`${destination}/note.png`);
-        const rendered = await renderDocument(
-          note,
-          store.path(destination),
-          width,
-        );
-        views.push({
-          width,
-          height: rendered.height,
-          image: await media(rendered.imagePath, "image/png"),
-          html: await media(rendered.htmlPath, "text/html"),
-          warnings: rendered.warnings,
-        });
-      } catch (error) {
-        views.push({ width, error: safeErrorMetadata(error) });
-      }
-    }
   }
   const counts: Record<string, number> = {};
   for (const event of events) {
@@ -146,7 +126,7 @@ export async function collectFullPageEvidence(result: RunResult) {
     materials: [...library.assets.values()],
     materialArtifacts: library.artifacts,
     layoutPassed:
-      views.length === inkReviewWidths.length &&
+      views.length === 1 &&
       views.every(
         (view) =>
           view.warnings && !view.warnings.some((warning) => warning.blocking),
@@ -175,7 +155,6 @@ export async function runFullPageExperiment(options: {
     ...configured,
     maxSteps: 50,
     maxInspectCalls: 8,
-    width: 1200,
     saveIntermediateImages: true,
   };
   const git = Bun.spawnSync(["git", "rev-parse", "HEAD"], {
@@ -192,7 +171,7 @@ export async function runFullPageExperiment(options: {
     judgment: "pending-human-review",
     acceptance: "not-assessed",
     pages: sources,
-    widths: inkReviewWidths,
+    page: a4Page,
     maxSteps: config.maxSteps,
     implementationCommit: git.stdout.toString().trim(),
     runtime: {

@@ -274,7 +274,7 @@ describe("real evaluation aggregation", () => {
       const directory = await temporary();
       const store = await createStoreFixture(directory);
       store.recorder.record("run.started", {
-        config: { width: 1600, model: { apiKey: "[REDACTED]" } },
+        config: { model: { apiKey: "[REDACTED]" } },
       });
       store.recorder.record("model.attempt.started", {
         step: 1,
@@ -286,7 +286,7 @@ describe("real evaluation aggregation", () => {
       await store.updateModel({ steps: 1, attempts: 1, usage });
       await store.commit(
         { markdown: simpleMarkdown(), audit: {} },
-        { kind: "write", step: 1, width: 1600 },
+        { kind: "write", step: 1 },
       );
       await store.review(2, async () => {});
       await store.finalize(3);
@@ -398,10 +398,10 @@ describe("real evaluation aggregation", () => {
   test("audits a partial run from its revision without requiring final output", async () => {
     const directory = await temporary();
     const store = await createStoreFixture(directory);
-    store.recorder.record("run.started", { config: { width: 700 } });
+    store.recorder.record("run.started", { config: {} });
     await store.commit(
       { markdown: simpleMarkdown(), audit: {} },
-      { kind: "write", step: 1, width: 700 },
+      { kind: "write", step: 1 },
     );
     await store.finish("model_stopped");
     const result = await inspectEvalAttempt(
