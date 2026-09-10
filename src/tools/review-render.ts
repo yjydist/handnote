@@ -5,6 +5,7 @@ import { createModelPreviews } from "../run/image.ts";
 import { compileNoteMarkdown } from "../run/markdown.ts";
 import { NoteStateError } from "../run/store.ts";
 import { atomicWrite } from "../run/utils.ts";
+import { inkLayoutFeedback } from "./ink-layout-feedback.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
@@ -13,6 +14,16 @@ class BlockedInkReview extends Error {
   constructor(readonly output: ReviewOutput) {
     super("Ink review requires layout repairs");
   }
+}
+
+function structureCounts(
+  structure: Record<string, number | undefined>,
+): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(structure).flatMap(([name, count]) =>
+      typeof count === "number" ? [[name, count]] : [],
+    ),
+  );
 }
 
 export function createReviewRenderHandler(
@@ -51,9 +62,7 @@ export function createReviewRenderHandler(
             ];
             const warnings = revision.warnings;
             const reviewed = !warnings.some((warning) => warning.blocking);
-            const structure = Object.entries(revision.structure)
-              .map(([name, count]) => `${name}=${count}`)
-              .join(", ");
+            const structure = inkLayoutFeedback(revision.structure, warnings);
             const usage = note.inkUsage;
             const coverage = usage
               ? `Ink source coverage: ${usage.usedStrokeIndices.length}/${usage.usedStrokeIndices.length + usage.unusedStrokeIndices.length} used; unusedStrokeIndices=${JSON.stringify(usage.unusedStrokeIndices)}. Check every unused stroke against the source image; select meaningful content that is missing or accurately record why it is omitted in the ink audit. Unused strokes are coverage facts, not automatic defects; using every stroke is not required.`
@@ -63,6 +72,10 @@ export function createReviewRenderHandler(
               dependenciesSha256: revision.dependenciesSha256,
               status: "pending-human-review",
               reviewed,
+              structure: structureCounts(revision.structure),
+              materialBoundaryWarnings: warnings.filter(
+                (warning) => warning.code === "ink_text_block",
+              ),
               views,
             };
             await atomicWrite(
@@ -78,9 +91,9 @@ export function createReviewRenderHandler(
               paths: views.map((view) => context.store.path(view.image.path)),
               mimeType: "image/png",
               warnings,
-              structure: revision.structure,
+              structure: structureCounts(revision.structure),
               reviewed,
-              summary: `Review revision ${revision.number}; A4 output: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. Rendered structure: ${structure}. ${reviewed ? "Compare the complete A4 output with the source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} ${coverage} Judgment: pending-human-review.`,
+              summary: `Review revision ${revision.number}; A4 output: ${views.map((view) => `${view.width}×${view.height}`).join(", ")}; ${layoutSummary(warnings)}; ${remainingSteps(execution)}. ${structure} ${reviewed ? "Compare the complete A4 output with the source; if faithful and readable, finalize in the next model step." : "NOT marked reviewed: repair all blocking assets using reselect/compose and revise_note, then review again. Do not finalize."} ${coverage} Judgment: pending-human-review.`,
             };
             if (!reviewed) throw new BlockedInkReview(inkOutput);
             return;
@@ -99,7 +112,7 @@ export function createReviewRenderHandler(
         path: context.store.path(revision.image.path),
         mimeType: "image/png" as const,
         warnings: revision.warnings,
-        structure: revision.structure,
+        structure: structureCounts(revision.structure),
         summary: `Review revision ${revision.number}; ${layoutSummary(revision.warnings)}; ${remainingSteps(execution)}. If source comparison finds no content issue, call finalize_note in the next model step without another revision.`,
       };
     } catch (error) {

@@ -227,6 +227,39 @@ test("tool schemas reject out-of-bounds crops and unknown draft fields", async (
   );
 });
 
+test("ink tool descriptions preserve Markdown positions and genuine stroke constraints", () => {
+  const unexpected = async (): Promise<never> => {
+    throw new Error("Description inspection does not execute tools");
+  };
+  const { tools } = setup({
+    ink: {
+      inspect_ink: unexpected,
+      select_ink: unexpected,
+      compose_ink: unexpected,
+    },
+  });
+  expect(tools.inspect_ink?.description).toContain(
+    "ordered/unordered/nested list items and table cells",
+  );
+  expect(tools.select_ink?.description).toContain(
+    "individual Markdown positions",
+  );
+  expect(tools.select_ink?.description).toContain("smallest inseparable group");
+  expect(tools.select_ink?.description).toContain(
+    "omit and audit their strokes instead of duplicating markers",
+  );
+  expect(tools.select_ink?.description).toContain(
+    "relationship explained in description",
+  );
+  expect(tools.compose_ink?.description).toContain(
+    "never recombine them into one wrapper image",
+  );
+  expect(tools.compose_ink?.description).toContain("presentation.description");
+  expect(tools.compose_ink?.description).toContain(
+    "whole characters and annotation-to-target relationships",
+  );
+});
+
 test.each([
   "inspect_source",
   "capture_figure",

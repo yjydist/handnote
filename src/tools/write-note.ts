@@ -7,6 +7,7 @@ import {
 import { revisionAuditSchema } from "../run/document.ts";
 import { MarkdownValidationError } from "../run/markdown.ts";
 import { NoteStateError } from "../run/store.ts";
+import { inkLayoutFeedback } from "./ink-layout-feedback.ts";
 import { layoutSummary, remainingSteps } from "./shared.ts";
 import type { ToolContext } from "./types.ts";
 
@@ -29,12 +30,16 @@ export async function commitNoteDraft(
       kind,
       step: execution.step,
     });
+    const structure =
+      context.store.manifest.formatVersion === 2
+        ? ` ${inkLayoutFeedback(revision.structure, revision.warnings)}`
+        : "";
     return {
       ok: true,
       revision: revision.number,
       markdownSha256: revision.markdown.sha256,
       warnings: revision.warnings,
-      summary: `Revision ${revision.number} rendered; ${layoutSummary(revision.warnings)}; ${remainingSteps(execution)}. Review this exact revision in a later model step.`,
+      summary: `Revision ${revision.number} rendered; ${layoutSummary(revision.warnings)}; ${remainingSteps(execution)}. Review this exact revision in a later model step.${structure}`,
     };
   } catch (error) {
     if (error instanceof z.ZodError)

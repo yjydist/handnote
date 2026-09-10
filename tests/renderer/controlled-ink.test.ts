@@ -88,6 +88,45 @@ const geometry = (page: Page) =>
     }),
   );
 
+test("tall text gets a geometric review cue without changing size or classifying diagrams", async () => {
+  const note = await compileNoteMarkdown(
+    "![large](large)\n\n![boundary](boundary)\n\n![small](small)\n\n![diagram](diagram)",
+    {
+      resolveImage: async (id) => {
+        const height = { large: 61, boundary: 60, small: 20, diagram: 160 }[id];
+        if (height === undefined) throw new Error(`Unexpected fixture: ${id}`);
+        return ink(id, {
+          height,
+          kind: id === "diagram" ? "diagram" : "text",
+        });
+      },
+    },
+  );
+  expect(note.warnings).toEqual([
+    {
+      code: "ink_text_block",
+      message: expect.stringContaining("3.05 reference character heights"),
+      blocking: false,
+      assetId: "large",
+      elementId: "ink-1",
+    },
+  ]);
+  expect(note.warnings[0]?.message).toContain("not a semantic determination");
+  expect(note.warnings[0]?.message).toContain(
+    "list items, paragraphs, or table cells",
+  );
+  expect(note.warnings[0]?.message).toContain("complete-character boundaries");
+  const result = await renderDocument(note, await temporary());
+  expect(result.warnings).toEqual(note.warnings);
+  const images = await inspect(result.htmlPath, geometry);
+  expect(images.map(({ width, height }) => [width, height])).toEqual([
+    [80, 61],
+    [80, 60],
+    [80, 20],
+    [80, 160],
+  ]);
+});
+
 test("controlled SVG images use heading, inline, list and diagram scale without captions", async () => {
   const note = await compileNoteMarkdown(
     "# ![title](title)\n\nBefore ![inline](inline) after.\n\n- Before ![list](list) after.\n\n![diagram alt](diagram)",
@@ -146,7 +185,15 @@ test.each([
       resolveImage: async (id) => ink(id, { width: 320, height: 160 }),
     });
     const result = await renderDocument(note, await temporary());
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings).toEqual(
+      ["first", "second"].map((assetId, index) => ({
+        code: "ink_text_block",
+        message: expect.stringContaining("8 reference character heights"),
+        blocking: false,
+        assetId,
+        elementId: `ink-${index + 1}`,
+      })),
+    );
     const items = await inspect(result.htmlPath, (page) =>
       page.locator("li").evaluateAll((elements) =>
         elements.map((element) => {
@@ -299,13 +346,16 @@ test("invalid controlled metadata is rejected and Markdown cannot forge ink or S
   })
     .png()
     .toBuffer();
-  const note = await compileNoteMarkdown(
-    '<svg><path d="M0 0"/></svg><img src="raster" data-hn-ink="forged" data-hn-ink-kind="diagram" style="width:500em">',
-    {
-      resolveImage: async () => ({ mimeType: "image/png", bytes: png }),
-    },
-  );
-  expect(note.html).not.toMatch(/<svg|<path|data-hn-ink|style=/);
+  for (const kind of ["text", "diagram"]) {
+    const note = await compileNoteMarkdown(
+      `<svg><path d="M0 0"/></svg><img src="raster" data-hn-ink="forged" data-hn-ink-kind="${kind}" data-hn-reference-height="1" height="500" style="width:500em">`,
+      {
+        resolveImage: async () => ({ mimeType: "image/png", bytes: png }),
+      },
+    );
+    expect(note.html).not.toMatch(/<svg|<path|data-hn-ink|style=/);
+    expect(note.warnings).toEqual([]);
+  }
 });
 
 test("raster image bytes, caption and A4 layout retain the original image contract", async () => {

@@ -155,7 +155,11 @@ async function figureDataUri(
   }
 }
 
-function prepareHtml(tree: Root, structure: NoteStructure): void {
+function prepareHtml(
+  tree: Root,
+  structure: Record<keyof NoteStructure, number>,
+  warnings: LayoutWarning[],
+): void {
   const ids = new Set<string>();
   let inkImages = 0;
   visit(tree, "element", (node) => {
@@ -181,9 +185,27 @@ function prepareHtml(tree: Root, structure: NoteStructure): void {
       node.properties.dataHnId = `block-${++structure.blocks}`;
     if (/^h[1-6]$/.test(node.tagName)) structure.headings++;
     if (node.tagName === "table") structure.tables++;
+    if (node.tagName === "ol") structure.orderedLists++;
+    if (node.tagName === "ul") structure.unorderedLists++;
+    if (node.tagName === "li") structure.listItems++;
+    if (node.tagName === "tr") structure.tableRows++;
+    if (node.tagName === "th" || node.tagName === "td") structure.tableCells++;
     if (node.tagName === "img") structure.figures++;
     if (node.properties.dataHnInk !== undefined)
       node.properties.dataHnId = `ink-${++inkImages}`;
+    if (node.properties.dataHnInkKind === "text") {
+      const referenceHeights =
+        Number(node.properties.height) /
+        Number(node.properties.dataHnReferenceHeight);
+      if (referenceHeights > 3)
+        warnings.push({
+          code: "ink_text_block",
+          message: `Text ink asset is ${referenceHeights} reference character heights tall. This is a geometric cue, not a semantic determination. Check whether it encloses multiple list items, paragraphs, or table cells; if so, split at complete-character boundaries and express that structure in Markdown.`,
+          blocking: false,
+          assetId: String(node.properties.dataHnInk),
+          elementId: String(node.properties.dataHnId),
+        });
+    }
     if (isMath(node)) structure.equations++;
   });
   visit(tree, "element", (node) => {
@@ -263,14 +285,20 @@ export async function compileNoteMarkdown(
         message: `Markdown exceeds ${maxMarkdownLength} characters: ${markdown.length}`,
       },
     ]);
-  const structure: NoteStructure = {
+  const structure: Record<keyof NoteStructure, number> = {
     headings: 0,
     blocks: 0,
     tables: 0,
     equations: 0,
     diagrams: 0,
     figures: 0,
+    orderedLists: 0,
+    unorderedLists: 0,
+    listItems: 0,
+    tableRows: 0,
+    tableCells: 0,
   };
+  const inkWarnings: LayoutWarning[] = [];
   let hasTitle = false;
   const file = await unified()
     .use(remarkParse)
@@ -315,7 +343,7 @@ export async function compileNoteMarkdown(
             );
         }),
       );
-      prepareHtml(tree, structure);
+      prepareHtml(tree, structure, inkWarnings);
     })
     .use(rehypeKatex)
     .use(rehypeStringify)
@@ -341,7 +369,7 @@ export async function compileNoteMarkdown(
     html: String(file),
     hasTitle,
     structure,
-    warnings,
+    warnings: [...inkWarnings, ...warnings],
   };
   return note;
 }

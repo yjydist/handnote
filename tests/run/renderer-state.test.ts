@@ -126,6 +126,11 @@ ${figureMarkdown}
       equations: 2,
       diagrams: 1,
       figures: 1,
+      orderedLists: 0,
+      unorderedLists: 0,
+      listItems: 0,
+      tableRows: 2,
+      tableCells: 4,
     });
     expect(
       result.warnings.some((warning) => warning.code === "equation_fallback"),

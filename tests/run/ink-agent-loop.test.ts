@@ -468,3 +468,71 @@ test("ink audits reject missing declarations and invalid or used omission IDs wi
     expect(store.manifest.currentRevision).toBe(1);
   }
 }, 30000);
+
+test("write and review expose Markdown structure and large text material candidates", async () => {
+  const { store, handlers, document } = await setup();
+  const asset = createInkFragment(document, {
+    strokeIndices: [0, 1, 2],
+    presentation: { kind: "text", referenceHeight: 5 },
+  });
+  await store.saveInkAsset(asset);
+  const written = await handlers.write_note(
+    { markdown: `- ![multiple items](../assets/ink/${asset.id}.svg)`, audit },
+    execution(1),
+  );
+  expect(written.ok).toBe(true);
+  if (!written.ok) throw new Error("Missing draft");
+  expect(written.warnings).toContainEqual(
+    expect.objectContaining({
+      code: "ink_text_block",
+      assetId: asset.id,
+      blocking: false,
+    }),
+  );
+  expect(written.summary).toContain("listItems=1");
+  expect(written.summary).toContain(asset.id);
+  const review = await handlers.review_render({}, execution(2));
+  expect(review).toMatchObject({ ok: true, reviewed: true });
+  expect(review.summary).toContain("listItems=1");
+  expect(review.summary).toContain(asset.id);
+  expect(review.summary).toContain(
+    "geometry do not establish semantic acceptance",
+  );
+
+  const fragments = await Promise.all(
+    [0, 1, 2].map((strokeIndex) =>
+      store.saveInkAsset(
+        createInkFragment(document, {
+          strokeIndices: [strokeIndex],
+          presentation: { kind: "text", referenceHeight: 20 },
+        }),
+      ),
+    ),
+  );
+  const revised = await handlers.revise_note(
+    {
+      markdown: fragments
+        .map(({ relativePath }) => `- ![one item](${relativePath})`)
+        .join("\n"),
+      audit,
+    },
+    execution(3),
+  );
+  expect(revised.ok).toBe(true);
+  expect(store.manifest.reviewedRevision).toBeUndefined();
+  const checked = await handlers.review_render({}, execution(4));
+  expect(checked).toMatchObject({ ok: true, reviewed: true });
+  expect(checked.summary).toContain("listItems=3");
+  expect(checked.summary).not.toContain("Material boundaries to inspect:");
+  const evidence = JSON.parse(
+    await readFile(
+      store.path("session/ink-reviews/revision-2/step-4/review.json"),
+      "utf8",
+    ),
+  );
+  expect(evidence).toMatchObject({
+    structure: { listItems: 3 },
+    materialBoundaryWarnings: [],
+    status: "pending-human-review",
+  });
+}, 30000);

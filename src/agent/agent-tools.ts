@@ -97,7 +97,7 @@ export function createAgentTools(options: {
         inspect_ink: createTool({
           id: "inspect_ink",
           description:
-            "View original trajectories, never OCR. Batch 1–8 views: {kind:'page'}, {kind:'region',region:{x,y,width,height}} in normalized REDRAW coordinates, or {kind:'asset',assetId}. Returns actual numbered previews, complete stroke IDs and bounds. Original-image mapping is unknown: do not transfer image coordinates by size ratios. Inspect the page, then batch regions to identify all meaningful strokes before selection.",
+            "View original trajectories, never OCR. Batch 1–8 views: {kind:'page'}, {kind:'region',region:{x,y,width,height}} in normalized REDRAW coordinates, or {kind:'asset',assetId}. Returns actual numbered previews, complete stroke IDs and bounds. Original-image mapping is unknown: do not transfer image coordinates by size ratios. Identify headings, paragraphs, ordered/unordered/nested list items and table cells before selecting materials for each Markdown position.",
           inputSchema: inspectInkInputSchema,
           outputSchema: inkToolOutputSchema,
           execute: (input) =>
@@ -107,7 +107,7 @@ export function createAgentTools(options: {
         select_ink: createTool({
           id: "select_ink",
           description:
-            "Batch 1–32 selections of complete original strokeIndices with presentation {kind:'text'|'diagram',referenceHeight,transcription?,description?}. referenceHeight is a representative handwritten CHARACTER body height in source coordinate units, not the bounding height of a paragraph or diagram. Choose every stroke belonging to the content, including dots and accents. Returns immutable asset IDs, exact Markdown paths, geometry and previews. Split long text by reselecting complete strokes into smaller fragments; never cut connected strokes. No points or SVG input is accepted.",
+            "Batch 1–32 selections of complete original strokeIndices for individual Markdown positions, with presentation {kind:'text'|'diagram',referenceHeight,transcription?,description?}. Keep whole characters, dots, punctuation and connected strokes. Independent headings, list items and table cells need separate materials; diagram kind requires an intrinsic spatial relationship explained in description, not a wrapper for ordinary lists. When Markdown replaces source item markers, omit and audit their strokes instead of duplicating markers. Genuine connected strokes stay in the smallest inseparable group, with structural limitations audited. referenceHeight measures representative CHARACTER body height in source units. Returns immutable IDs, exact Markdown paths, geometry and previews; no points or SVG input is accepted.",
           inputSchema: selectInkInputSchema,
           outputSchema: inkToolOutputSchema,
           execute: (input) =>
@@ -117,7 +117,7 @@ export function createAgentTools(options: {
         compose_ink: createTool({
           id: "compose_ink",
           description:
-            "Batch 1–32 compositions of EXISTING same-page assets. Each part is {assetId,rotation,scale,x,y}: clockwise degrees about the asset's top-left local origin, then uniform scale, then translation in composition coordinates (y down). Scale and cumulative scale must stay 0.01–100. No duplicate source strokes within a composition. Supply presentation with representative character referenceHeight in resulting coordinates. One part rotates/rescales an asset; multiple parts arrange it. New ID does not change old assets or notes: use revise_note and review again. Inspect returned previews for omissions, crossings and wrong relationships.",
+            "Batch 1–32 compositions of EXISTING same-page assets within a meaningful material. Keep independent Markdown headings, list items and table cells separate; never recombine them into one wrapper image. Diagram kind is for necessary spatial relationships, explained in presentation.description. Each part is {assetId,rotation,scale,x,y}: clockwise rotation about the asset's top-left origin, then uniform scale, then translation (y down). Scale and cumulative scale stay 0.01–100; no duplicate source strokes. Supply representative character referenceHeight in resulting coordinates. Inspect previews for whole characters and annotation-to-target relationships. New IDs require revise_note and another review.",
           inputSchema: composeInkInputSchema,
           outputSchema: inkToolOutputSchema,
           execute: (input) =>

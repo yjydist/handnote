@@ -24,6 +24,11 @@ export const noteStructureSchema = z
     equations: z.number(),
     diagrams: z.number(),
     figures: z.number(),
+    orderedLists: z.number().optional(),
+    unorderedLists: z.number().optional(),
+    listItems: z.number().optional(),
+    tableRows: z.number().optional(),
+    tableCells: z.number().optional(),
   })
   .strict();
 

@@ -79,6 +79,41 @@ describe("configuration", () => {
     expect(prompt).toContain("Put every currently known edit into one flat");
     expect(prompt).toContain("immediately following model step");
   });
+
+  test("ink prompt requires Markdown structure before materials and reviews both", async () => {
+    const { text: prompt } = await loadPrompt("ink");
+    const phases = [
+      "### 1. Identify the Markdown structure",
+      "### 2. Select materials for those positions",
+      "### 3. Write the structured note",
+      "### 4. Review structure and appearance",
+    ].map((phase) => prompt.indexOf(phase));
+    expect(phases.every((position) => position >= 0)).toBe(true);
+    expect(phases).toEqual([...phases].sort((a, b) => a - b));
+    expect(prompt).toContain(
+      "ordered and unordered lists, nested list levels, and table rows and columns",
+    );
+    expect(prompt).toContain(
+      "multiple list items or multiple table cells in one text or diagram asset",
+    );
+    expect(prompt).toContain(
+      "One Markdown position may contain several complete word-group SVGs",
+    );
+    expect(prompt).toContain(
+      "record their IDs and the preserved item relationship in audit.ink.omissions",
+    );
+    expect(prompt).toContain("preserve the smallest affected group");
+    expect(prompt).toContain(
+      "Explain that necessity in presentation.description",
+    );
+    expect(prompt).toContain(
+      "ink_text_block observation measures geometry, not semantic correctness",
+    );
+    expect(prompt).toContain(
+      "Never inflate referenceHeight or relabel ordinary text as diagram",
+    );
+    expect(prompt).toContain("Missing Markdown structure");
+  });
 });
 
 describe("run naming and hashes", () => {
