@@ -90,7 +90,7 @@ const geometry = (page: Page) =>
 
 test("controlled SVG images use heading, inline, list and diagram scale without captions", async () => {
   const note = await compileNoteMarkdown(
-    "# ![title](title)\n\nBefore ![inline](inline) after.\n\n- ![list](list)\n\n![diagram alt](diagram)",
+    "# ![title](title)\n\nBefore ![inline](inline) after.\n\n- Before ![list](list) after.\n\n![diagram alt](diagram)",
     {
       resolveImage: async (id) =>
         ink(
@@ -133,6 +133,76 @@ test("controlled SVG images use heading, inline, list and diagram scale without 
     .toBuffer();
   expect([...pixel]).toEqual([0, 0, 0]);
 });
+
+test.each([
+  ["tight unordered", "- ![first](first)\n- ![second](second)"],
+  ["loose unordered", "- ![first](first)\n\n- ![second](second)"],
+  ["tight ordered", "1. ![first](first)\n2. ![second](second)"],
+  ["loose ordered", "1. ![first](first)\n\n2. ![second](second)"],
+])(
+  "%s image-only list markers stay beside the first handwritten line",
+  async (_name, markdown) => {
+    const note = await compileNoteMarkdown(markdown, {
+      resolveImage: async (id) => ink(id, { width: 320, height: 160 }),
+    });
+    const result = await renderDocument(note, await temporary());
+    expect(result.warnings).toEqual([]);
+    const items = await inspect(result.htmlPath, (page) =>
+      page.locator("li").evaluateAll((elements) =>
+        elements.map((element) => {
+          const image = element.querySelector("img");
+          if (!image) throw new Error("Missing list image");
+          const item = element.getBoundingClientRect();
+          const ink = image.getBoundingClientRect();
+          return {
+            x: item.x,
+            y: item.y,
+            height: item.height,
+            imageTop: ink.y,
+            imageWidth: ink.width,
+            imageHeight: ink.height,
+            lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+          };
+        }),
+      ),
+    );
+    expect(items).toHaveLength(2);
+    const scale = a4Page.width / a4Page.layoutWidth;
+    for (const item of items) {
+      expect([item.imageWidth, item.imageHeight]).toEqual([320, 160]);
+      const top = Math.floor(item.y * scale);
+      const marker = await sharp(result.imagePath)
+        .extract({
+          left: Math.floor((item.x - 30) * scale),
+          top,
+          width: Math.floor(28 * scale),
+          height: Math.ceil(item.height * scale),
+        })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const rows: number[] = [];
+      for (let y = 0; y < marker.info.height; y++) {
+        for (let x = 0; x < marker.info.width; x++) {
+          const offset = (y * marker.info.width + x) * marker.info.channels;
+          if (
+            (marker.data[offset] ?? 255) < 100 &&
+            (marker.data[offset + 1] ?? 255) < 100 &&
+            (marker.data[offset + 2] ?? 255) < 100
+          ) {
+            rows.push(y);
+            break;
+          }
+        }
+      }
+      expect(rows.length).toBeGreaterThan(0);
+      const markerMiddle =
+        (top + ((rows[0] ?? 0) + (rows.at(-1) ?? 0)) / 2) / scale;
+      expect(markerMiddle).toBeGreaterThanOrEqual(item.imageTop);
+      expect(markerMiddle).toBeLessThan(item.imageTop + item.lineHeight);
+    }
+  },
+);
 
 test("A4 layout wraps whole assets inside narrow containers without changing their geometry", async () => {
   const note = await compileNoteMarkdown(

@@ -187,6 +187,30 @@ function prepareHtml(tree: Root, structure: NoteStructure): void {
     if (isMath(node)) structure.equations++;
   });
   visit(tree, "element", (node) => {
+    if (node.tagName === "li") {
+      const content = node.children.filter(
+        (child) => child.type !== "text" || child.value.trim(),
+      );
+      const first = content[0];
+      const image =
+        first?.type === "element" &&
+        first.tagName === "p" &&
+        first.children.length === 1
+          ? first.children[0]
+          : first;
+      if (
+        content.length === 1 &&
+        image?.type === "element" &&
+        image.tagName === "img" &&
+        image.properties.dataHnInkKind === "text" &&
+        typeof image.properties.style === "string"
+      )
+        // A standalone image must not move the list's first-line marker to its bottom edge.
+        image.properties.style = image.properties.style.replace(
+          "vertical-align:baseline",
+          "vertical-align:top",
+        );
+    }
     const only = node.children[0];
     if (node.children.length !== 1 || only?.type !== "element") return;
     if (node.tagName === "pre" && only.tagName === "code") {
